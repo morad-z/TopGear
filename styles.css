@@ -238,7 +238,8 @@ h1 {
   min-width: 70px;
 }
 
-.range-date {
+.range-date,
+.range-month {
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 7px 9px;
@@ -248,7 +249,8 @@ h1 {
   min-width: 140px;
 }
 
-.range-date.hidden {
+.range-date.hidden,
+.range-month.hidden {
   display: none !important;
 }
 

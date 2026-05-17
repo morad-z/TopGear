@@ -25,6 +25,7 @@ const state = {
   activeView: "jobs",
   activeRange: "today",
   specificRangeDate: "",
+  specificRangeMonth: "",
   activeJobsFilter: "open",
   activeDeliveryRange: "upcoming",
   activeAppointmentRange: "upcoming",
@@ -194,6 +195,7 @@ function cacheElements() {
 
   els.rangeButtons = Array.from(document.querySelectorAll("[data-range]"));
   els.specificRangeDate = document.querySelector("#specificRangeDate");
+  els.specificRangeMonth = document.querySelector("#specificRangeMonth");
   els.revenueMetric = document.querySelector("#revenueMetric");
   els.costMetric = document.querySelector("#costMetric");
   els.profitMetric = document.querySelector("#profitMetric");
@@ -287,6 +289,7 @@ function bindEvents() {
     button.addEventListener("click", () => {
       state.activeRange = button.dataset.range;
       els.rangeButtons.forEach((item) => item.classList.toggle("active", item === button));
+
       if (state.activeRange === "specific") {
         els.specificRangeDate.classList.remove("hidden");
         if (!els.specificRangeDate.value) {
@@ -296,12 +299,29 @@ function bindEvents() {
       } else {
         els.specificRangeDate.classList.add("hidden");
       }
+
+      if (state.activeRange === "month") {
+        els.specificRangeMonth.classList.remove("hidden");
+        if (!els.specificRangeMonth.value) {
+          const now = new Date();
+          els.specificRangeMonth.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        }
+        state.specificRangeMonth = els.specificRangeMonth.value;
+      } else {
+        els.specificRangeMonth.classList.add("hidden");
+      }
+
       renderAnalytics();
     });
   });
 
   els.specificRangeDate.addEventListener("change", () => {
     state.specificRangeDate = els.specificRangeDate.value;
+    renderAnalytics();
+  });
+
+  els.specificRangeMonth.addEventListener("change", () => {
+    state.specificRangeMonth = els.specificRangeMonth.value;
     renderAnalytics();
   });
 
@@ -1947,6 +1967,14 @@ function getDateRange(range) {
   }
 
   if (range === "month") {
+    if (state.specificRangeMonth) {
+      const [yearStr, monthStr] = state.specificRangeMonth.split("-");
+      const year = Number(yearStr);
+      const month = Number(monthStr) - 1;
+      const monthStart = new Date(year, month, 1, 0, 0, 0, 0);
+      const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+      return { start: monthStart, end: monthEnd };
+    }
     start.setDate(1);
   }
 
