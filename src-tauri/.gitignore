@@ -1,0 +1,13 @@
+# Rust build output
+target/
+Cargo.lock
+
+# Tauri generated
+gen/schemas/
+icons/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

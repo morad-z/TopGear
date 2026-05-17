@@ -1,0 +1,22 @@
+# Tauri / Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+src-tauri/gen/schemas/
+src-tauri/icons/
+
+# Node
+node_modules/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/
+
+# Local DBs / runtime
+ruvector.db
+*.db-journal
+
+# Claude/local config (do not publish)
+.claude/

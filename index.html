@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TopGear - ניהול מוסך</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="ניווט ראשי">
+        <div class="brand">
+          <img class="brand-logo" src="./assets/topgear.png" alt="Top Gear" />
+          <div>
+            <strong>TopGear</strong>
+            <small>מכונאות כללית ושיפורי רכב</small>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-button active" type="button" data-view="jobs">
+            <span aria-hidden="true">▦</span>
+            יומן עבודה
+          </button>
+          <button class="nav-button" type="button" data-view="inventory">
+            <span aria-hidden="true">▤</span>
+            ניהול מלאי חלקים
+          </button>
+          <button class="nav-button" type="button" data-view="deliveries">
+            <span aria-hidden="true">⊞</span>
+            מסירות צפויות
+          </button>
+          <button class="nav-button" type="button" data-view="backup">
+            <span aria-hidden="true">⇩</span>
+            גיבוי וייצוא
+          </button>
+        </nav>
+      </aside>
+
+      <main class="main-panel">
+        <header class="topbar">
+          <div>
+            <h1 id="screenTitle">יומן עבודה</h1>
+            <p id="screenSubtitle">מעקב תיקונים יומי, חלקים, חיובים ורווחיות</p>
+          </div>
+          <div class="status-pill">
+            <span class="status-dot" aria-hidden="true"></span>
+            עובד 100% מקומית
+          </div>
+        </header>
+
+        <section class="view active" id="jobsView" aria-labelledby="jobsHeading">
+          <div class="analytics-band">
+            <div class="range-switch" role="group" aria-label="בחירת טווח תאריכים">
+              <button class="range-button active" type="button" data-range="today">היום</button>
+              <button class="range-button" type="button" data-range="week">השבוע</button>
+              <button class="range-button" type="button" data-range="month">החודש</button>
+              <button class="range-button" type="button" data-range="all">הכל</button>
+            </div>
+            <div class="metric">
+              <span>סה"כ הכנסות</span>
+              <strong id="revenueMetric">₪0</strong>
+            </div>
+            <div class="metric">
+              <span>סה"כ עלויות</span>
+              <strong id="costMetric">₪0</strong>
+            </div>
+            <div class="metric profit">
+              <span>רווח נקי</span>
+              <strong id="profitMetric">₪0</strong>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <label class="search-box">
+              <span>חיפוש</span>
+              <input id="jobSearch" type="search" placeholder="מספר רכב, בעלים או סוג רכב" />
+            </label>
+            <button class="primary-button" type="button" id="addJobButton">הוספת עבודה</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table" id="jobsTable">
+              <thead>
+                <tr>
+                  <th>תאריך</th>
+                  <th>יום</th>
+                  <th>מספר רכב</th>
+                  <th>סוג רכב</th>
+                  <th>שנת הרכב</th>
+                  <th>נפח מנוע</th>
+                  <th>שם בעל הרכב</th>
+                  <th>חלקים</th>
+                  <th>מחיר חלקים למוסך</th>
+                  <th>מחיר חלקים ללקוח</th>
+                  <th>מחיר עבודה</th>
+                  <th>סה"כ</th>
+                  <th>רווח</th>
+                  <th>תאריך מסירה</th>
+                  <th>פעולות</th>
+                </tr>
+              </thead>
+              <tbody id="jobsBody"></tbody>
+            </table>
+            <div class="empty-state hidden" id="jobsEmpty">אין עבודות להצגה</div>
+          </div>
+        </section>
+
+        <section class="view" id="inventoryView" aria-labelledby="inventoryHeading">
+          <div class="toolbar">
+            <label class="search-box">
+              <span>חיפוש</span>
+              <input id="inventorySearch" type="search" placeholder="מק&quot;ט או שם חלק" />
+            </label>
+            <button class="primary-button" type="button" id="addPartButton">הוספת חלק</button>
+          </div>
+
+          <div class="part-category-tabs" id="inventoryCategoryTabs" role="tablist" aria-label="סינון לפי קטגוריה"></div>
+
+          <div class="table-wrap">
+            <table class="data-table" id="inventoryTable">
+              <thead>
+                <tr>
+                  <th>מק"ט חלק</th>
+                  <th>חלק</th>
+                  <th>קטגוריה</th>
+                  <th>כמות</th>
+                  <th>מחיר חלק למוסך</th>
+                  <th>מחיר חלק ללקוח</th>
+                  <th>פעולות</th>
+                </tr>
+              </thead>
+              <tbody id="inventoryBody"></tbody>
+            </table>
+            <div class="empty-state hidden" id="inventoryEmpty">אין חלקים במלאי</div>
+          </div>
+        </section>
+
+        <section class="view" id="deliveriesView" aria-labelledby="deliveriesHeading">
+          <div class="toolbar">
+            <label class="search-box">
+              <span>חיפוש</span>
+              <input id="deliverySearch" type="search" placeholder="מספר רכב, בעלים או סוג רכב" />
+            </label>
+            <div class="range-switch" role="group" aria-label="סינון לפי תאריך מסירה">
+              <button class="range-button active" type="button" data-delivery-range="upcoming">צפויות</button>
+              <button class="range-button" type="button" data-delivery-range="week">השבוע</button>
+              <button class="range-button" type="button" data-delivery-range="month">החודש</button>
+              <button class="range-button" type="button" data-delivery-range="overdue">באיחור</button>
+              <button class="range-button" type="button" data-delivery-range="all">הכל</button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table" id="deliveriesTable">
+              <thead>
+                <tr>
+                  <th>סטטוס</th>
+                  <th>תאריך מסירה</th>
+                  <th>ימים נותרו</th>
+                  <th>מספר רכב</th>
+                  <th>סוג רכב</th>
+                  <th>שם בעל הרכב</th>
+                  <th>חלקים</th>
+                  <th>סה"כ</th>
+                  <th>פעולות</th>
+                </tr>
+              </thead>
+              <tbody id="deliveriesBody"></tbody>
+            </table>
+            <div class="empty-state hidden" id="deliveriesEmpty">אין מסירות להצגה</div>
+          </div>
+        </section>
+
+        <section class="view" id="backupView" aria-labelledby="backupHeading">
+          <div class="backup-grid">
+            <section class="backup-panel">
+              <h2>ייצוא נתונים</h2>
+              <p>שמירת עותק מקומי של היומן והמלאי לקבצים במחשב.</p>
+              <div class="button-row">
+                <button class="secondary-button" type="button" id="exportJsonButton">ייצוא JSON מלא</button>
+                <button class="secondary-button" type="button" id="exportJobsCsvButton">ייצוא יומן CSV</button>
+                <button class="secondary-button" type="button" id="exportInventoryCsvButton">ייצוא מלאי CSV</button>
+              </div>
+            </section>
+
+            <section class="backup-panel">
+              <h2>ייבוא מגיבוי</h2>
+              <p>הייבוא מחליף את הנתונים הקיימים לאחר אישור מפורש.</p>
+              <label class="file-input">
+                <span>בחירת קובץ JSON</span>
+                <input type="file" id="importJsonInput" accept="application/json,.json" />
+              </label>
+            </section>
+
+            <section class="backup-panel warning">
+              <h2>פרטיות ואחסון</h2>
+              <p>כל המידע נשמר בדפדפן המקומי במחשב זה בלבד. אין התחברות, אין שרת ואין סנכרון לרשת.</p>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="modal-backdrop hidden" id="jobModal" role="dialog" aria-modal="true" aria-labelledby="jobModalTitle">
+      <form class="modal" id="jobForm">
+        <div class="modal-header">
+          <h2 id="jobModalTitle">הוספת עבודה</h2>
+          <button class="icon-button" type="button" data-close-modal="jobModal" aria-label="סגירה">×</button>
+        </div>
+
+        <div class="form-grid">
+          <label>
+            תאריך
+            <input name="jobDate" type="date" required />
+          </label>
+          <label>
+            מספר רכב
+            <input name="vehiclePlate" type="text" required autocomplete="off" />
+          </label>
+          <label>
+            סוג רכב
+            <input name="vehicleModel" type="text" list="vehicleModels" autocomplete="off" />
+            <datalist id="vehicleModels">
+              <option value="טויוטה קורולה"></option>
+              <option value="יונדאי i30"></option>
+              <option value="קיה ספורטאז'"></option>
+              <option value="מאזדה 3"></option>
+              <option value="סקודה אוקטביה"></option>
+            </datalist>
+          </label>
+          <label>
+            שנת הרכב
+            <input name="vehicleYear" type="number" min="1950" max="2100" inputmode="numeric" />
+          </label>
+          <label>
+            נפח מנוע
+            <input name="engineDisplacement" type="number" min="0" inputmode="numeric" />
+          </label>
+          <label>
+            שם בעל הרכב
+            <input name="ownerName" type="text" autocomplete="off" />
+          </label>
+          <label>
+            מחיר עבודה
+            <input name="laborPrice" type="number" min="0" step="0.01" inputmode="decimal" />
+          </label>
+          <label>
+            תאריך מסירה
+            <input name="deliveryDate" type="date" />
+          </label>
+        </div>
+
+        <section class="parts-picker">
+          <div class="section-title">
+            <h3>חלקים לעבודה</h3>
+            <div class="button-row tight">
+              <button class="secondary-button compact" type="button" id="toggleInlinePartButton">יצירת חלק חדש</button>
+            </div>
+          </div>
+          <div class="job-part-row">
+            <label class="part-search-field">
+              חיפוש חלק
+              <input id="partPickerSearch" type="search" placeholder="שם חלק או מק&quot;ט" autocomplete="off" />
+            </label>
+            <label class="part-quantity-field">
+              כמות
+              <input id="partQuantity" type="number" min="1" value="1" aria-label="כמות" />
+            </label>
+            <p class="picker-hint">בחר חלק מהכרטיסיות ולחץ על "הוספה לעבודה" שיופיע על הכרטיס</p>
+          </div>
+
+          <div class="part-category-tabs" id="partCategoryTabs" role="tablist" aria-label="קטגוריות חלקים"></div>
+          <div class="part-card-grid" id="partCardGrid" role="listbox" aria-label="בחירת חלק מהמלאי"></div>
+          <div class="empty-state compact hidden" id="partPickerEmpty">לא נמצאו חלקים תואמים</div>
+
+          <div class="inline-part-panel hidden" id="inlinePartPanel">
+            <div class="section-title">
+              <h4>חלק חדש למלאי</h4>
+              <button class="icon-button small" type="button" id="cancelInlinePartButton" aria-label="סגירת יצירת חלק">×</button>
+            </div>
+            <div class="inline-part-grid">
+              <label>
+                מק"ט חלק
+                <input id="inlinePartSku" type="text" autocomplete="off" />
+              </label>
+              <label>
+                חלק
+                <input id="inlinePartName" type="text" autocomplete="off" />
+              </label>
+              <label>
+                קטגוריה
+                <select id="inlinePartCategory"></select>
+              </label>
+              <label>
+                כמות במלאי
+                <input id="inlinePartQuantity" type="number" min="0" step="1" value="1" inputmode="numeric" />
+              </label>
+              <label>
+                מחיר למוסך
+                <input id="inlinePartGarageCost" type="number" min="0" step="0.01" value="0" inputmode="decimal" />
+              </label>
+              <label>
+                מחיר ללקוח
+                <input id="inlinePartCustomerPrice" type="number" min="0" step="0.01" value="0" inputmode="decimal" />
+              </label>
+              <button class="primary-button" type="button" id="saveInlinePartButton">שמירה והוספה לעבודה</button>
+            </div>
+            <p class="form-error hidden" id="inlinePartError"></p>
+          </div>
+
+          <div class="selected-parts" id="selectedParts"></div>
+        </section>
+
+        <div class="totals-strip">
+          <span>עלות חלקים: <strong id="draftPartsCost">₪0</strong></span>
+          <span>מחיר חלקים ללקוח: <strong id="draftPartsPrice">₪0</strong></span>
+          <span>סה"כ: <strong id="draftTotal">₪0</strong></span>
+          <span>רווח: <strong id="draftProfit">₪0</strong></span>
+        </div>
+
+        <p class="form-error hidden" id="jobError"></p>
+
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="jobModal">ביטול</button>
+          <button class="primary-button" type="submit">שמירה</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop hidden" id="partModal" role="dialog" aria-modal="true" aria-labelledby="partModalTitle">
+      <form class="modal compact-modal" id="partForm">
+        <div class="modal-header">
+          <h2 id="partModalTitle">הוספת חלק</h2>
+          <button class="icon-button" type="button" data-close-modal="partModal" aria-label="סגירה">×</button>
+        </div>
+
+        <div class="form-grid single">
+          <label>
+            מק"ט חלק
+            <input name="sku" type="text" required autocomplete="off" />
+          </label>
+          <label>
+            חלק
+            <input name="name" type="text" required autocomplete="off" />
+          </label>
+          <label>
+            קטגוריה
+            <select name="category" id="partCategorySelect"></select>
+          </label>
+          <label>
+            כמות
+            <input name="quantity" type="number" min="0" step="1" required inputmode="numeric" />
+          </label>
+          <label>
+            מחיר חלק למוסך
+            <input name="garageCost" type="number" min="0" step="0.01" required inputmode="decimal" />
+          </label>
+          <label>
+            מחיר חלק ללקוח
+            <input name="customerPrice" type="number" min="0" step="0.01" required inputmode="decimal" />
+          </label>
+        </div>
+
+        <p class="form-error hidden" id="partError"></p>
+
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="partModal">ביטול</button>
+          <button class="primary-button" type="submit">שמירה</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

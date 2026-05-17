@@ -1,0 +1,55 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate Tauri icons from logo
+        run: npx --yes @tauri-apps/cli@latest icon assets/topgear.png
+
+      - name: Build & release Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "TopGear ${{ github.ref_name }}"
+          releaseBody: |
+            התקנת TopGear על Windows:
+
+            1. הורידו את קובץ ה-`.msi` או `.exe` למטה.
+            2. הריצו את ההתקנה (תאשרו ב-Windows SmartScreen אם תופיע התרעה — האפליקציה אינה חתומה דיגיטלית).
+            3. הפעילו "TopGear" מתפריט ההתחלה.
+
+            עדכונים אוטומטיים מופעלים — המערכת תציע להתקין גרסה חדשה כשתתפרסם, ללא איבוד נתונים. כל הנתונים נשמרים מקומית במחשב הלקוח. ניתן לייצא גיבוי JSON ממסך "גיבוי וייצוא".
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
