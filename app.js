@@ -24,6 +24,8 @@ const state = {
   appointments: [],
   activeView: "jobs",
   activeRange: "today",
+  specificRangeDate: "",
+  activeJobsFilter: "open",
   activeDeliveryRange: "upcoming",
   activeAppointmentRange: "upcoming",
   activePartCategory: "all",
@@ -32,6 +34,7 @@ const state = {
   editingJobId: null,
   editingPartId: null,
   editingAppointmentId: null,
+  appointmentBeingConverted: null,
   draftParts: [],
   selectedJobRow: 0,
   selectedInventoryRow: 0
@@ -189,7 +192,8 @@ function cacheElements() {
     backup: document.querySelector("#backupView")
   };
 
-  els.rangeButtons = Array.from(document.querySelectorAll(".range-button"));
+  els.rangeButtons = Array.from(document.querySelectorAll("[data-range]"));
+  els.specificRangeDate = document.querySelector("#specificRangeDate");
   els.revenueMetric = document.querySelector("#revenueMetric");
   els.costMetric = document.querySelector("#costMetric");
   els.profitMetric = document.querySelector("#profitMetric");
@@ -198,6 +202,7 @@ function cacheElements() {
   els.jobsBody = document.querySelector("#jobsBody");
   els.jobsEmpty = document.querySelector("#jobsEmpty");
   els.addJobButton = document.querySelector("#addJobButton");
+  els.jobsFilterButtons = Array.from(document.querySelectorAll("[data-jobs-filter]"));
 
   els.inventorySearch = document.querySelector("#inventorySearch");
   els.inventoryBody = document.querySelector("#inventoryBody");
@@ -244,6 +249,10 @@ function cacheElements() {
   els.inlinePartQuantity = document.querySelector("#inlinePartQuantity");
   els.inlinePartGarageCost = document.querySelector("#inlinePartGarageCost");
   els.inlinePartCustomerPrice = document.querySelector("#inlinePartCustomerPrice");
+  els.inlinePartTemporary = document.querySelector("#inlinePartTemporary");
+  els.inlinePartTitle = document.querySelector("#inlinePartTitle");
+  els.inlinePartSkuLabel = document.querySelector("#inlinePartSkuLabel");
+  els.inlinePartQuantityLabel = document.querySelector("#inlinePartQuantityLabel");
   els.selectedParts = document.querySelector("#selectedParts");
   els.draftPartsCost = document.querySelector("#draftPartsCost");
   els.draftPartsPrice = document.querySelector("#draftPartsPrice");
@@ -278,11 +287,32 @@ function bindEvents() {
     button.addEventListener("click", () => {
       state.activeRange = button.dataset.range;
       els.rangeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      if (state.activeRange === "specific") {
+        els.specificRangeDate.classList.remove("hidden");
+        if (!els.specificRangeDate.value) {
+          els.specificRangeDate.value = toIsoDate(new Date());
+        }
+        state.specificRangeDate = els.specificRangeDate.value;
+      } else {
+        els.specificRangeDate.classList.add("hidden");
+      }
       renderAnalytics();
     });
   });
 
+  els.specificRangeDate.addEventListener("change", () => {
+    state.specificRangeDate = els.specificRangeDate.value;
+    renderAnalytics();
+  });
+
   els.jobSearch.addEventListener("input", renderJobs);
+  els.jobsFilterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeJobsFilter = button.dataset.jobsFilter;
+      els.jobsFilterButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderJobs();
+    });
+  });
   els.inventorySearch.addEventListener("input", renderInventory);
   els.deliverySearch.addEventListener("input", renderDeliveries);
   els.deliveryRangeButtons.forEach((button) => {
@@ -316,6 +346,7 @@ function bindEvents() {
   els.toggleInlinePartButton.addEventListener("click", showInlinePartPanel);
   els.cancelInlinePartButton.addEventListener("click", hideInlinePartPanel);
   els.saveInlinePartButton.addEventListener("click", saveInlinePart);
+  els.inlinePartTemporary.addEventListener("change", updateInlinePartMode);
   els.jobForm.addEventListener("submit", saveJobFromForm);
   els.partForm.addEventListener("submit", savePartFromForm);
   els.inlinePartCategory.addEventListener("change", handleCategorySelectChange);
@@ -518,11 +549,16 @@ function switchView(view) {
 
 function renderJobs() {
   const query = normalizeSearch(els.jobSearch.value);
+  const filter = state.activeJobsFilter || "open";
   const rows = state.jobs.filter((job) => {
+    const isDelivered = Boolean(job.deliveredAt);
+    if (filter === "open" && isDelivered) return false;
+    if (filter === "delivered" && !isDelivered) return false;
     const haystack = normalizeSearch([
       job.vehiclePlate,
       job.vehicleModel,
       job.ownerName,
+      job.phoneNumber,
       job.parts?.map((part) => part.nameSnapshot).join(" ")
     ].join(" "));
     return haystack.includes(query);
@@ -531,10 +567,16 @@ function renderJobs() {
   els.jobsBody.innerHTML = "";
   rows.forEach((job, index) => {
     const totals = getJobTotals(job);
+    const isDelivered = Boolean(job.deliveredAt);
     const row = document.createElement("tr");
     row.tabIndex = 0;
     row.dataset.rowIndex = String(index);
     row.classList.toggle("selected", index === state.selectedJobRow);
+    row.classList.toggle("job-delivered", isDelivered);
+
+    const deliverButton = isDelivered
+      ? `<button class="row-action" type="button" data-job-reopen="${job.id}">↩ החזר לפתוח</button>`
+      : `<button class="row-action success-action" type="button" data-job-deliver="${job.id}">✓ סמן כנמסר</button>`;
 
     row.innerHTML = `
       <td>${formatDate(job.jobDate)}</td>
@@ -544,6 +586,7 @@ function renderJobs() {
       <td>${job.vehicleYear || ""}</td>
       <td>${job.engineDisplacement || ""}</td>
       <td>${escapeHtml(job.ownerName || "")}</td>
+      <td>${job.phoneNumber ? `<a href="tel:${escapeHtml(job.phoneNumber)}" class="phone-link">${escapeHtml(job.phoneNumber)}</a>` : ""}</td>
       <td class="parts-cell" title="${escapeHtml(getPartsText(job))}">${escapeHtml(getPartsText(job))}</td>
       <td class="numeric">${formatCurrency(totals.partsCost)}</td>
       <td class="numeric">${formatCurrency(totals.partsPrice)}</td>
@@ -554,6 +597,7 @@ function renderJobs() {
       <td>${formatDate(job.deliveryDate)}</td>
       <td>
         <span class="row-actions">
+          ${deliverButton}
           <button class="row-action" type="button" data-job-edit="${job.id}">עריכה</button>
           <button class="row-action danger-action" type="button" data-job-delete="${job.id}">מחיקה</button>
         </span>
@@ -574,8 +618,44 @@ function renderJobs() {
   els.jobsBody.querySelectorAll("[data-job-delete]").forEach((button) => {
     button.addEventListener("click", () => deleteJob(Number(button.dataset.jobDelete)));
   });
+  els.jobsBody.querySelectorAll("[data-job-deliver]").forEach((button) => {
+    button.addEventListener("click", () => markJobDelivered(Number(button.dataset.jobDeliver)));
+  });
+  els.jobsBody.querySelectorAll("[data-job-reopen]").forEach((button) => {
+    button.addEventListener("click", () => markJobReopened(Number(button.dataset.jobReopen)));
+  });
 
   els.jobsEmpty.classList.toggle("hidden", rows.length > 0);
+}
+
+async function markJobDelivered(jobId) {
+  const transaction = state.db.transaction("jobs", "readwrite");
+  const store = transaction.objectStore("jobs");
+  const job = await idbRequest(store.get(jobId));
+  if (!job) return;
+  job.deliveredAt = new Date().toISOString();
+  job.updatedAt = job.deliveredAt;
+  store.put(job);
+  await transactionDone(transaction);
+  await refreshData();
+  renderJobs();
+  renderDeliveries();
+  showToast(`העבודה ${job.vehiclePlate} סומנה כנמסרה`);
+}
+
+async function markJobReopened(jobId) {
+  const transaction = state.db.transaction("jobs", "readwrite");
+  const store = transaction.objectStore("jobs");
+  const job = await idbRequest(store.get(jobId));
+  if (!job) return;
+  delete job.deliveredAt;
+  job.updatedAt = new Date().toISOString();
+  store.put(job);
+  await transactionDone(transaction);
+  await refreshData();
+  renderJobs();
+  renderDeliveries();
+  showToast(`העבודה ${job.vehiclePlate} הוחזרה לפתוחה`);
 }
 
 function renderInventory() {
@@ -649,6 +729,7 @@ function renderDeliveries() {
 
   const candidates = state.jobs.filter((job) => {
     if (!job.deliveryDate) return false;
+    if (job.deliveredAt) return false;
     const haystack = normalizeSearch([
       job.vehiclePlate,
       job.vehicleModel,
@@ -681,6 +762,7 @@ function renderDeliveries() {
       <td class="numeric">${formatCurrency(totals.total)}</td>
       <td>
         <span class="row-actions">
+          <button class="row-action success-action" type="button" data-delivery-deliver="${job.id}">✓ סמן כנמסר</button>
           <button class="row-action" type="button" data-delivery-edit="${job.id}">פתיחת עבודה</button>
         </span>
       </td>
@@ -691,6 +773,9 @@ function renderDeliveries() {
 
   els.deliveriesBody.querySelectorAll("[data-delivery-edit]").forEach((button) => {
     button.addEventListener("click", () => openJobModal(Number(button.dataset.deliveryEdit)));
+  });
+  els.deliveriesBody.querySelectorAll("[data-delivery-deliver]").forEach((button) => {
+    button.addEventListener("click", () => markJobDelivered(Number(button.dataset.deliveryDeliver)));
   });
 
   els.deliveriesEmpty.classList.toggle("hidden", filtered.length > 0);
@@ -769,15 +854,21 @@ function renderAppointments() {
 
   els.appointmentsBody.innerHTML = "";
   filtered.forEach((appointment) => {
+    const arrived = Boolean(appointment.arrivedAt);
     const days = getDaysUntil(appointment.appointmentDate);
-    const statusClass = getAppointmentStatusClass(days);
-    const statusLabel = getAppointmentStatusLabel(days);
+    const statusClass = arrived ? "arrived" : getAppointmentStatusClass(days);
+    const statusLabel = arrived ? "הגיע" : getAppointmentStatusLabel(days);
     const row = document.createElement("tr");
     row.classList.add(`appointment-${statusClass}`);
+    if (arrived) row.classList.add("appointment-arrived");
 
     const phoneHtml = appointment.phoneNumber
       ? `<a href="tel:${escapeHtml(appointment.phoneNumber)}" class="phone-link">${escapeHtml(appointment.phoneNumber)}</a>`
       : "";
+
+    const arriveButtonHtml = arrived
+      ? `<button class="row-action" type="button" data-appointment-revert="${appointment.id}">↩ סמן כלא הגיע</button>`
+      : `<button class="row-action success-action" type="button" data-appointment-arrive="${appointment.id}">✓ הגיע - פתח עבודה</button>`;
 
     row.innerHTML = `
       <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
@@ -791,6 +882,7 @@ function renderAppointments() {
       <td class="notes-cell" title="${escapeHtml(appointment.notes || "")}">${escapeHtml(appointment.notes || "")}</td>
       <td>
         <span class="row-actions">
+          ${arriveButtonHtml}
           <button class="row-action" type="button" data-appointment-edit="${appointment.id}">עריכה</button>
           <button class="row-action danger-action" type="button" data-appointment-delete="${appointment.id}">מחיקה</button>
         </span>
@@ -806,13 +898,29 @@ function renderAppointments() {
   els.appointmentsBody.querySelectorAll("[data-appointment-delete]").forEach((button) => {
     button.addEventListener("click", () => deleteAppointment(Number(button.dataset.appointmentDelete)));
   });
+  els.appointmentsBody.querySelectorAll("[data-appointment-arrive]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const appointmentId = Number(button.dataset.appointmentArrive);
+      const appointment = state.appointments.find((item) => item.id === appointmentId);
+      if (!appointment) return;
+      switchView("jobs");
+      openJobModal(null, appointment);
+    });
+  });
+  els.appointmentsBody.querySelectorAll("[data-appointment-revert]").forEach((button) => {
+    button.addEventListener("click", () => revertAppointmentArrival(Number(button.dataset.appointmentRevert)));
+  });
 
   els.appointmentsEmpty.classList.toggle("hidden", filtered.length > 0);
 }
 
 function isAppointmentInRange(appointment, range) {
+  const arrived = Boolean(appointment.arrivedAt);
+  if (range === "arrived") return arrived;
+  if (range === "all") return true;
+  if (arrived) return false;
   const days = getDaysUntil(appointment.appointmentDate);
-  if (days === null) return range === "all";
+  if (days === null) return false;
   switch (range) {
     case "upcoming":
       return days >= 0;
@@ -822,8 +930,6 @@ function isAppointmentInRange(appointment, range) {
       return days === 1;
     case "week":
       return days >= 0 && days <= 7;
-    case "all":
-      return true;
     default:
       return days >= 0;
   }
@@ -945,6 +1051,20 @@ async function deleteAppointment(appointmentId) {
   await refreshData();
   renderAppointments();
   showToast("התור נמחק");
+}
+
+async function revertAppointmentArrival(appointmentId) {
+  const transaction = state.db.transaction("appointments", "readwrite");
+  const store = transaction.objectStore("appointments");
+  const existing = await idbRequest(store.get(appointmentId));
+  if (!existing) return;
+  delete existing.arrivedAt;
+  existing.updatedAt = new Date().toISOString();
+  store.put(existing);
+  await transactionDone(transaction);
+  await refreshData();
+  renderAppointments();
+  showToast(`התור של ${existing.customerName} סומן כלא הגיע`);
 }
 
 function renderAnalytics() {
@@ -1155,8 +1275,9 @@ function getFilteredPickerParts() {
     });
 }
 
-function openJobModal(jobId = null) {
+function openJobModal(jobId = null, prefillAppointment = null) {
   state.editingJobId = jobId;
+  state.appointmentBeingConverted = (!jobId && prefillAppointment) ? prefillAppointment.id : null;
   state.selectedPartId = null;
   state.activePartCategory = "all";
   clearError(els.jobError);
@@ -1182,6 +1303,7 @@ function openJobModal(jobId = null) {
     els.jobForm.elements.vehicleYear.value = job.vehicleYear || "";
     els.jobForm.elements.engineDisplacement.value = job.engineDisplacement || "";
     els.jobForm.elements.ownerName.value = job.ownerName || "";
+    els.jobForm.elements.phoneNumber.value = job.phoneNumber || "";
     els.jobForm.elements.laborPrice.value = String(job.laborPrice || 0);
     els.jobForm.elements.deliveryDate.value = job.deliveryDate || "";
     els.taxEnabled.checked = Boolean(job.taxEnabled);
@@ -1189,6 +1311,12 @@ function openJobModal(jobId = null) {
     state.draftParts = structuredClone(job.parts || []);
   } else {
     els.jobModalTitle.textContent = "הוספת עבודה";
+    if (prefillAppointment) {
+      els.jobForm.elements.vehiclePlate.value = prefillAppointment.vehiclePlate || "";
+      els.jobForm.elements.vehicleModel.value = prefillAppointment.vehicleModel || "";
+      els.jobForm.elements.ownerName.value = prefillAppointment.customerName || "";
+      els.jobForm.elements.phoneNumber.value = prefillAppointment.phoneNumber || "";
+    }
   }
 
   renderDraftParts();
@@ -1196,6 +1324,10 @@ function openJobModal(jobId = null) {
   delete els.jobForm.elements.vehiclePlate.dataset.lastLookup;
   openModal("jobModal");
   requestAnimationFrame(() => els.jobForm.elements.vehiclePlate.focus());
+
+  if (!jobId && prefillAppointment && prefillAppointment.vehiclePlate) {
+    autofillVehicleFields(els.jobForm.elements.vehiclePlate, els.jobForm, { fillModel: true, fillYear: true, fillEngine: true });
+  }
 }
 
 function openPartModal(partId = null) {
@@ -1311,7 +1443,17 @@ function showInlinePartPanel() {
   els.inlinePartQuantity.value = "1";
   els.inlinePartGarageCost.value = "0";
   els.inlinePartCustomerPrice.value = "0";
+  els.inlinePartTemporary.checked = false;
+  updateInlinePartMode();
   requestAnimationFrame(() => els.inlinePartSku.focus());
+}
+
+function updateInlinePartMode() {
+  const isTemp = els.inlinePartTemporary.checked;
+  els.inlinePartTitle.textContent = isTemp ? "חלק זמני לעבודה זו" : "חלק חדש למלאי";
+  els.inlinePartSkuLabel.textContent = isTemp ? "מק\"ט חלק (אופציונלי)" : "מק\"ט חלק";
+  els.inlinePartQuantityLabel.textContent = isTemp ? "כמות לעבודה" : "כמות במלאי";
+  els.saveInlinePartButton.textContent = isTemp ? "הוספה לעבודה" : "שמירה והוספה לעבודה";
 }
 
 function hideInlinePartPanel() {
@@ -1323,35 +1465,69 @@ function hideInlinePartPanel() {
   els.inlinePartQuantity.value = "1";
   els.inlinePartGarageCost.value = "0";
   els.inlinePartCustomerPrice.value = "0";
+  els.inlinePartTemporary.checked = false;
+  updateInlinePartMode();
 }
 
 async function saveInlinePart() {
   clearError(els.inlinePartError);
 
-  const part = {
-    sku: els.inlinePartSku.value.trim(),
-    name: els.inlinePartName.value.trim(),
-    category: els.inlinePartCategory.value || "general",
-    quantity: toOptionalInt(els.inlinePartQuantity.value) ?? 0,
-    garageCost: toMoney(els.inlinePartGarageCost.value),
-    customerPrice: toMoney(els.inlinePartCustomerPrice.value),
-    updatedAt: new Date().toISOString()
-  };
+  const isTemp = els.inlinePartTemporary.checked;
+  const sku = els.inlinePartSku.value.trim();
+  const name = els.inlinePartName.value.trim();
+  const category = els.inlinePartCategory.value || "general";
+  const quantity = toOptionalInt(els.inlinePartQuantity.value) ?? 0;
+  const garageCost = toMoney(els.inlinePartGarageCost.value);
+  const customerPrice = toMoney(els.inlinePartCustomerPrice.value);
 
-  if (!part.sku || !part.name) {
-    showError(els.inlinePartError, "מק\"ט ושם חלק הם שדות חובה");
+  if (!name) {
+    showError(els.inlinePartError, "שם חלק הוא שדה חובה");
     return;
   }
 
-  if (part.quantity < 1) {
-    showError(els.inlinePartError, "כדי להוסיף חלק לעבודה יש להזין לפחות יחידה אחת במלאי");
+  if (!isTemp && !sku) {
+    showError(els.inlinePartError, "מק\"ט הוא שדה חובה לחלק קבוע");
     return;
   }
 
-  if (part.customerPrice <= 0) {
+  if (quantity < 1) {
+    showError(els.inlinePartError, isTemp ? "כמות לעבודה חייבת להיות לפחות 1" : "כמות במלאי חייבת להיות לפחות 1");
+    return;
+  }
+
+  if (customerPrice <= 0) {
     showError(els.inlinePartError, "מחיר ללקוח חייב להיות גדול מ-0");
     return;
   }
+
+  if (isTemp) {
+    const effectiveSku = sku || `TEMP-${Date.now()}`;
+    state.draftParts.push({
+      partId: null,
+      temporary: true,
+      skuSnapshot: effectiveSku,
+      nameSnapshot: name,
+      categorySnapshot: category,
+      quantityUsed: quantity,
+      garageCostSnapshot: garageCost,
+      customerPriceSnapshot: customerPrice
+    });
+    renderDraftParts();
+    renderPartPicker();
+    hideInlinePartPanel();
+    showToast(`חלק זמני "${name}" נוסף לעבודה`);
+    return;
+  }
+
+  const part = {
+    sku,
+    name,
+    category,
+    quantity,
+    garageCost,
+    customerPrice,
+    updatedAt: new Date().toISOString()
+  };
 
   try {
     const newPartId = await savePart(part, null);
@@ -1387,9 +1563,10 @@ function renderDraftParts() {
   } else {
     state.draftParts.forEach((part, index) => {
       const chip = document.createElement("span");
-      chip.className = "part-chip";
+      chip.className = part.temporary ? "part-chip part-chip-temp" : "part-chip";
+      const tempBadge = part.temporary ? ' <small class="chip-temp-badge">זמני</small>' : "";
       chip.innerHTML = `
-        <span>${escapeHtml(part.nameSnapshot)} × ${part.quantityUsed}</span>
+        <span>${escapeHtml(part.nameSnapshot)} × ${part.quantityUsed}${tempBadge}</span>
         <button type="button" aria-label="הסרת חלק" data-remove-draft-part="${index}">×</button>
       `;
       els.selectedParts.appendChild(chip);
@@ -1450,6 +1627,7 @@ async function saveJobFromForm(event) {
     vehicleYear: toOptionalInt(form.get("vehicleYear")),
     engineDisplacement: toOptionalInt(form.get("engineDisplacement")),
     ownerName: String(form.get("ownerName") || "").trim(),
+    phoneNumber: String(form.get("phoneNumber") || "").trim(),
     laborPrice: toMoney(form.get("laborPrice")),
     deliveryDate: String(form.get("deliveryDate") || ""),
     parts: structuredClone(state.draftParts),
@@ -1471,10 +1649,27 @@ async function saveJobFromForm(event) {
 
   try {
     await saveJobWithInventoryTransaction(job, state.editingJobId);
+    const convertedAppointmentId = state.appointmentBeingConverted;
+    if (convertedAppointmentId) {
+      try {
+        const transaction = state.db.transaction("appointments", "readwrite");
+        const store = transaction.objectStore("appointments");
+        const existing = await idbRequest(store.get(convertedAppointmentId));
+        if (existing) {
+          existing.arrivedAt = new Date().toISOString();
+          existing.updatedAt = existing.arrivedAt;
+          store.put(existing);
+        }
+        await transactionDone(transaction);
+      } catch (markError) {
+        console.warn("Failed to mark linked appointment as arrived:", markError);
+      }
+      state.appointmentBeingConverted = null;
+    }
     await refreshData();
     renderAll();
     closeModal("jobModal");
-    showToast("העבודה נשמרה והמלאי עודכן");
+    showToast(convertedAppointmentId ? "העבודה נשמרה והתור סומן כהגיע" : "העבודה נשמרה והמלאי עודכן");
   } catch (error) {
     console.error(error);
     showError(els.jobError, error.message || "שגיאה בשמירת העבודה");
@@ -1485,10 +1680,12 @@ function validateJobParts(parts) {
   const requiredByPart = new Map();
 
   for (const part of parts || []) {
-    if (!part.partId) return "אחד החלקים בעבודה אינו קיים במלאי";
+    if (!part.partId && !part.temporary) return "אחד החלקים בעבודה אינו קיים במלאי";
     if (Number(part.quantityUsed || 0) <= 0) return "כמות חלק חייבת להיות גדולה מ-0";
     if (Number(part.customerPriceSnapshot || 0) <= 0) return `יש לעדכן מחיר ללקוח עבור ${part.nameSnapshot}`;
-    requiredByPart.set(part.partId, (requiredByPart.get(part.partId) || 0) + Number(part.quantityUsed || 0));
+    if (part.partId) {
+      requiredByPart.set(part.partId, (requiredByPart.get(part.partId) || 0) + Number(part.quantityUsed || 0));
+    }
   }
 
   for (const [partId, requiredQuantity] of requiredByPart.entries()) {
@@ -1669,7 +1866,7 @@ async function deletePart(partId) {
 
 function renderTaxCell(totals) {
   if (totals.taxEnabled) {
-    return `<span class="tax-badge included" title="מע&quot;מ של ${totals.taxRate}% נוסף לסה&quot;כ (${formatCurrency(totals.taxAmount)})">כלול ${totals.taxRate}%</span>`;
+    return `<span class="tax-badge included" title="${totals.taxRate}% מע&quot;מ על ${formatCurrency(totals.subtotal)}">${formatCurrency(totals.taxAmount)}</span>`;
   }
   return `<span class="tax-badge excluded" title="ללא מע&quot;מ">ללא</span>`;
 }
@@ -1757,6 +1954,13 @@ function getDateRange(range) {
     return { start: null, end: null };
   }
 
+  if (range === "specific") {
+    if (!state.specificRangeDate) return { start: null, end: null };
+    const specificStart = new Date(`${state.specificRangeDate}T00:00:00`);
+    const specificEnd = new Date(`${state.specificRangeDate}T23:59:59.999`);
+    return { start: specificStart, end: specificEnd };
+  }
+
   return { start, end };
 }
 
@@ -1790,6 +1994,7 @@ function exportJobsCsv() {
     "שנת הרכב",
     "נפח מנוע",
     "שם בעל הרכב",
+    "טלפון",
     "חלקים",
     "מחיר חלקים למוסך",
     "מחיר חלקים ללקוח",
@@ -1812,6 +2017,7 @@ function exportJobsCsv() {
       job.vehicleYear,
       job.engineDisplacement,
       job.ownerName,
+      job.phoneNumber || "",
       getPartsText(job),
       totals.partsCost,
       totals.partsPrice,
@@ -1906,6 +2112,7 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       createdAt: appointment.createdAt || new Date().toISOString(),
       updatedAt: appointment.updatedAt || new Date().toISOString()
     };
+    if (appointment.arrivedAt) record.arrivedAt = String(appointment.arrivedAt);
     if (appointment.id !== undefined && appointment.id !== null) record.id = appointment.id;
     appointmentsStore.put(record);
   }
@@ -1933,6 +2140,7 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       vehicleYear: toOptionalInt(job.vehicleYear),
       engineDisplacement: toOptionalInt(job.engineDisplacement),
       ownerName: String(job.ownerName || ""),
+      phoneNumber: String(job.phoneNumber || ""),
       laborPrice: toMoney(job.laborPrice),
       deliveryDate: job.deliveryDate || "",
       parts: Array.isArray(job.parts) ? job.parts : [],
@@ -1941,6 +2149,7 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       createdAt: job.createdAt || new Date().toISOString(),
       updatedAt: job.updatedAt || new Date().toISOString()
     };
+    if (job.deliveredAt) record.deliveredAt = String(job.deliveredAt);
     if (job.id !== undefined && job.id !== null) record.id = job.id;
     jobsStore.put(record);
   }

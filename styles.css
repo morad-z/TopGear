@@ -226,9 +226,30 @@ h1 {
 }
 
 .range-switch {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   padding: 6px;
+  align-items: center;
+}
+
+.range-switch > .range-button {
+  flex: 1 1 auto;
+  min-width: 70px;
+}
+
+.range-date {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-family: inherit;
+  background: #fff;
+  color: var(--ink);
+  min-width: 140px;
+}
+
+.range-date.hidden {
+  display: none !important;
 }
 
 .range-button {
@@ -1028,6 +1049,73 @@ input.part-category-button.add-category-input:focus {
   background: #eef0f4;
   color: #4b5563;
   border-color: #d1d5db;
+}
+
+tr.job-delivered {
+  color: #6b7280;
+  background: #f8fafc;
+}
+
+tr.job-delivered td {
+  text-decoration: line-through;
+  text-decoration-color: rgba(0, 0, 0, 0.2);
+}
+
+tr.job-delivered .row-actions {
+  text-decoration: none;
+}
+
+.row-action.success-action {
+  border-color: #16a34a;
+  color: #15803d;
+  background: #f0fdf4;
+}
+
+.row-action.success-action:hover {
+  background: #16a34a;
+  color: #fff;
+}
+
+.part-chip.part-chip-temp {
+  background: #fff7ed;
+  border-color: #fdba74;
+  color: #9a3412;
+}
+
+.chip-temp-badge {
+  display: inline-block;
+  margin-inline-start: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #fed7aa;
+  color: #9a3412;
+  font-weight: 600;
+  font-size: 10px;
+  vertical-align: 1px;
+}
+
+.inline-part-temp-line {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  background: #fff7ed;
+  border: 1px dashed #fdba74;
+  border-radius: 6px;
+}
+
+tr.appointment-arrived {
+  color: #6b7280;
+  background: #f8fafc;
+}
+
+tr.appointment-arrived td:not(:first-child):not(:last-child) {
+  text-decoration: line-through;
+  text-decoration-color: rgba(0, 0, 0, 0.2);
+}
+
+.delivery-badge.arrived {
+  background: #f0fdf4;
+  color: #15803d;
+  border-color: #16a34a;
 }
 
 .delivery-badge {
