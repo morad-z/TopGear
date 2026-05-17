@@ -25,7 +25,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis"],
+    "targets": ["nsis"],
     "category": "Productivity",
     "shortDescription": "ניהול מוסך אופליין",
     "longDescription": "TopGear — מערכת לניהול עבודות, מלאי חלקים ומסירות, שעובדת מקומית במחשב.",
@@ -38,9 +38,6 @@
       "icons/icon.png"
     ],
     "windows": {
-      "wix": {
-        "language": ["en-US"]
-      },
       "nsis": {
         "installMode": "currentUser",
         "languages": ["English"]
