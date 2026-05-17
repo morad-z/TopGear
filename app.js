@@ -57,6 +57,99 @@ document.addEventListener("DOMContentLoaded", async () => {
   setTimeout(() => { checkForUpdates().catch(() => {}); }, 3000);
 });
 
+const VEHICLE_DATASET_ID = "053cea08-09bc-40ec-8f7a-156f0677aff3";
+const MODELS_DATASET_ID = "142afde2-6228-49f9-8a29-9b6c3a0cbe40";
+
+async function ckanQuery(resourceId, filters) {
+  const url = `https://data.gov.il/api/3/action/datastore_search?resource_id=${resourceId}&filters=${encodeURIComponent(JSON.stringify(filters))}&limit=1`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  return data?.result?.records?.[0] || null;
+}
+
+async function lookupVehicleByPlate(plate) {
+  const digits = String(plate || "").replace(/\D/g, "");
+  if (digits.length < 5) return null;
+
+  const vehicle = await ckanQuery(VEHICLE_DATASET_ID, { mispar_rechev: digits });
+  if (!vehicle) return null;
+
+  const manufacturerVerbose = String(vehicle.tozeret_nm || "").trim();
+  const commercial = String(vehicle.kinuy_mishari || "").trim();
+  const year = vehicle.shnat_yitzur || null;
+  const color = String(vehicle.tzeva_rechev || "").trim();
+  const fuelType = String(vehicle.sug_delek_nm || "").trim();
+
+  let cleanBrand = manufacturerVerbose;
+  let engineDisplacement = null;
+  let modelDetails = null;
+
+  try {
+    const modelFilters = { tozeret_cd: vehicle.tozeret_cd, degem_cd: vehicle.degem_cd };
+    if (year) modelFilters.shnat_yitzur = year;
+    modelDetails = await ckanQuery(MODELS_DATASET_ID, modelFilters);
+  } catch (error) {
+    console.warn("Model dataset query failed:", error);
+  }
+
+  if (modelDetails) {
+    if (modelDetails.tozar) cleanBrand = String(modelDetails.tozar).trim();
+    if (modelDetails.nefah_manoa) engineDisplacement = Number(modelDetails.nefah_manoa) || null;
+  }
+
+  const model = [cleanBrand, commercial].filter(Boolean).join(" ");
+
+  return {
+    model,
+    year,
+    engineDisplacement,
+    color,
+    fuelType
+  };
+}
+
+async function autofillVehicleFields(plateInput, form, opts = {}) {
+  const plate = plateInput.value;
+  const digits = plate.replace(/\D/g, "");
+  if (digits.length < 5) return;
+  if (plateInput.dataset.lastLookup === digits) return;
+  plateInput.dataset.lastLookup = digits;
+
+  showToast("מחפש פרטי רכב...");
+  try {
+    const data = await lookupVehicleByPlate(plate);
+    if (!data) {
+      showToast("הרכב לא נמצא במאגר משרד התחבורה");
+      return;
+    }
+
+    let filled = false;
+    if (opts.fillModel && form.elements.vehicleModel && !form.elements.vehicleModel.value && data.model) {
+      form.elements.vehicleModel.value = data.model;
+      filled = true;
+    }
+    if (opts.fillYear && form.elements.vehicleYear && !form.elements.vehicleYear.value && data.year) {
+      form.elements.vehicleYear.value = String(data.year);
+      filled = true;
+    }
+    if (opts.fillEngine && form.elements.engineDisplacement && !form.elements.engineDisplacement.value && data.engineDisplacement) {
+      form.elements.engineDisplacement.value = String(data.engineDisplacement);
+      filled = true;
+    }
+
+    const summary = [data.model, data.year, data.engineDisplacement && `${data.engineDisplacement} סמ"ק`].filter(Boolean).join(" · ");
+    if (filled) {
+      showToast(`נמצא: ${summary}`);
+    } else {
+      showToast(`נמצא: ${summary} (שדות כבר מולאו)`);
+    }
+  } catch (error) {
+    console.warn("Vehicle lookup failed:", error);
+    showToast("שגיאה בחיפוש הרכב (בדוק חיבור לאינטרנט)");
+  }
+}
+
 async function checkForUpdates() {
   if (!window.__TAURI__ || !window.__TAURI__.core) return;
   const { invoke } = window.__TAURI__.core;
@@ -208,6 +301,13 @@ function bindEvents() {
   });
   els.addAppointmentButton.addEventListener("click", () => openAppointmentModal());
   els.appointmentForm.addEventListener("submit", saveAppointmentFromForm);
+
+  els.jobForm.elements.vehiclePlate.addEventListener("blur", (event) => {
+    autofillVehicleFields(event.target, els.jobForm, { fillModel: true, fillYear: true, fillEngine: true });
+  });
+  els.appointmentForm.elements.vehiclePlate.addEventListener("blur", (event) => {
+    autofillVehicleFields(event.target, els.appointmentForm, { fillModel: true });
+  });
   els.partPickerSearch.addEventListener("input", renderPartPicker);
   els.addJobButton.addEventListener("click", () => openJobModal());
   els.addPartButton.addEventListener("click", () => openPartModal());
@@ -768,6 +868,7 @@ function openAppointmentModal(appointmentId = null) {
     els.appointmentForm.elements.appointmentDate.value = toIsoDate(new Date());
   }
 
+  delete els.appointmentForm.elements.vehiclePlate.dataset.lastLookup;
   openModal("appointmentModal");
   requestAnimationFrame(() => els.appointmentForm.elements.customerName.focus());
 }
@@ -1090,6 +1191,7 @@ function openJobModal(jobId = null) {
 
   renderDraftParts();
   renderPartPicker();
+  delete els.jobForm.elements.vehiclePlate.dataset.lastLookup;
   openModal("jobModal");
   requestAnimationFrame(() => els.jobForm.elements.vehiclePlate.focus());
 }

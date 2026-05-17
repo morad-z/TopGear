@@ -975,6 +975,28 @@ input.part-category-button.add-category-input:focus {
   color: var(--ink);
 }
 
+.tax-controls .labor-field {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-inline-end: auto;
+}
+
+.tax-controls .labor-field > span {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.tax-controls .labor-field input[type="number"] {
+  width: 120px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
 .totals-strip .tax-line {
   color: var(--accent-strong);
   font-weight: 500;

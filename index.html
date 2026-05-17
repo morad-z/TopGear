@@ -292,10 +292,6 @@
             <input name="ownerName" type="text" autocomplete="off" />
           </label>
           <label>
-            מחיר עבודה
-            <input name="laborPrice" type="number" min="0" step="0.01" inputmode="decimal" />
-          </label>
-          <label>
             תאריך מסירה
             <input name="deliveryDate" type="date" />
           </label>
@@ -362,7 +358,11 @@
           <div class="selected-parts" id="selectedParts"></div>
         </section>
 
-        <div class="tax-controls">
+        <div class="tax-controls financial-controls">
+          <label class="labor-field">
+            <span>מחיר עבודה (לפני מע"מ)</span>
+            <input name="laborPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" />
+          </label>
           <label class="checkbox-line">
             <input type="checkbox" id="taxEnabled" name="taxEnabled" checked />
             <span>כלול מע"מ בחשבון ללקוח</span>
