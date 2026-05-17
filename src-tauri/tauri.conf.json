@@ -43,7 +43,7 @@
       },
       "nsis": {
         "installMode": "currentUser",
-        "installerLanguages": ["English"]
+        "languages": ["English"]
       }
     }
   },
