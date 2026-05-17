@@ -163,7 +163,9 @@ async function checkForUpdates() {
   }
   if (!update || !update.available) return;
 
-  const proceed = confirm(`גרסה חדשה (${update.version}) זמינה. הגרסה הנוכחית: ${update.current_version}. להוריד ולהתקין כעת? המערכת תאתחל בסיום.`);
+  const notes = (update.body || "").trim();
+  const notesBlock = notes ? `\n\nמה חדש בגרסה זו:\n${notes}\n` : "";
+  const proceed = confirm(`גרסה חדשה (${update.version}) זמינה.\nהגרסה הנוכחית: ${update.current_version}${notesBlock}\nלהוריד ולהתקין כעת? המערכת תאתחל בסיום.`);
   if (!proceed) return;
 
   showToast("מוריד עדכון, אנא המתינו...");
@@ -1934,6 +1936,8 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       laborPrice: toMoney(job.laborPrice),
       deliveryDate: job.deliveryDate || "",
       parts: Array.isArray(job.parts) ? job.parts : [],
+      taxEnabled: Boolean(job.taxEnabled),
+      taxRate: Number(job.taxRate) || 0,
       createdAt: job.createdAt || new Date().toISOString(),
       updatedAt: job.updatedAt || new Date().toISOString()
     };

@@ -6,6 +6,7 @@ struct UpdateInfo {
     available: bool,
     version: String,
     current_version: String,
+    body: Option<String>,
 }
 
 #[tauri::command]
@@ -16,6 +17,7 @@ async fn check_for_updates(app: tauri::AppHandle) -> Result<Option<UpdateInfo>, 
             available: true,
             version: update.version.clone(),
             current_version: update.current_version.clone(),
+            body: update.body.clone(),
         })),
         Ok(None) => Ok(None),
         Err(e) => Err(e.to_string()),

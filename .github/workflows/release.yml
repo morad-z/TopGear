@@ -45,6 +45,27 @@ jobs:
           Copy-Item index.html, app.js, styles.css -Destination dist
           Copy-Item -Recurse -Force assets -Destination dist/assets
 
+      - name: Extract release notes for this tag
+        id: changelog
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $notes = ""
+          if (Test-Path CHANGELOG.md) {
+            $content = Get-Content CHANGELOG.md -Raw
+            $pattern = "(?ms)^##\s+$([regex]::Escape($tag))\s*\r?\n(.+?)(?=^##\s|\z)"
+            if ($content -match $pattern) {
+              $notes = $matches[1].Trim()
+            }
+          }
+          if (-not $notes) {
+            $notes = "(אין רשומות גרסה מפורטות ל-$tag)"
+          }
+          $delim = "EOF_NOTES_" + [Guid]::NewGuid().ToString("N")
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "notes<<$delim" -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value $notes -Encoding utf8
+          Add-Content -Path $env:GITHUB_OUTPUT -Value $delim -Encoding utf8
+
       - name: Build & release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -54,14 +75,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "TopGear ${{ github.ref_name }}"
-          releaseBody: |
-            התקנת TopGear על Windows:
-
-            1. הורידו את קובץ ה-`.msi` או `.exe` למטה.
-            2. הריצו את ההתקנה (תאשרו ב-Windows SmartScreen אם תופיע התרעה — האפליקציה אינה חתומה דיגיטלית).
-            3. הפעילו "TopGear" מתפריט ההתחלה.
-
-            עדכונים אוטומטיים מופעלים — המערכת תציע להתקין גרסה חדשה כשתתפרסם, ללא איבוד נתונים. כל הנתונים נשמרים מקומית במחשב הלקוח. ניתן לייצא גיבוי JSON ממסך "גיבוי וייצוא".
+          releaseBody: ${{ steps.changelog.outputs.notes }}
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
