@@ -30,6 +30,10 @@
             <span aria-hidden="true">⊞</span>
             מסירות צפויות
           </button>
+          <button class="nav-button" type="button" data-view="appointments">
+            <span aria-hidden="true">◰</span>
+            תורים
+          </button>
           <button class="nav-button" type="button" data-view="backup">
             <span aria-hidden="true">⇩</span>
             גיבוי וייצוא
@@ -117,6 +121,13 @@
 
           <div class="part-category-tabs" id="inventoryCategoryTabs" role="tablist" aria-label="סינון לפי קטגוריה"></div>
 
+          <div class="analytics-band inventory-band">
+            <div class="metric"><span>עלות כוללת (למוסך)</span><strong id="inventoryTotalCost">₪0</strong></div>
+            <div class="metric"><span>מחיר מכירה כולל (ללקוח)</span><strong id="inventoryTotalSell">₪0</strong></div>
+            <div class="metric profit"><span>רווח פוטנציאלי</span><strong id="inventoryTotalProfit">₪0</strong></div>
+            <div class="metric"><span>סה"כ יחידות במלאי</span><strong id="inventoryTotalUnits">0</strong></div>
+          </div>
+
           <div class="table-wrap">
             <table class="data-table" id="inventoryTable">
               <thead>
@@ -169,6 +180,44 @@
               <tbody id="deliveriesBody"></tbody>
             </table>
             <div class="empty-state hidden" id="deliveriesEmpty">אין מסירות להצגה</div>
+          </div>
+        </section>
+
+        <section class="view" id="appointmentsView" aria-labelledby="appointmentsHeading">
+          <div class="toolbar">
+            <label class="search-box">
+              <span>חיפוש</span>
+              <input id="appointmentSearch" type="search" placeholder="שם לקוח, טלפון, סוג רכב או סיבת הגעה" />
+            </label>
+            <div class="range-switch" role="group" aria-label="סינון תורים">
+              <button class="range-button active" type="button" data-appointment-range="upcoming">צפויים</button>
+              <button class="range-button" type="button" data-appointment-range="today">היום</button>
+              <button class="range-button" type="button" data-appointment-range="tomorrow">מחר</button>
+              <button class="range-button" type="button" data-appointment-range="week">השבוע</button>
+              <button class="range-button" type="button" data-appointment-range="all">הכל</button>
+            </div>
+            <button class="primary-button" type="button" id="addAppointmentButton">הוספת תור</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table" id="appointmentsTable">
+              <thead>
+                <tr>
+                  <th>סטטוס</th>
+                  <th>תאריך</th>
+                  <th>שעה</th>
+                  <th>שם הלקוח</th>
+                  <th>טלפון</th>
+                  <th>מספר רכב</th>
+                  <th>סוג רכב</th>
+                  <th>סיבת הגעה</th>
+                  <th>הערות</th>
+                  <th>פעולות</th>
+                </tr>
+              </thead>
+              <tbody id="appointmentsBody"></tbody>
+            </table>
+            <div class="empty-state hidden" id="appointmentsEmpty">אין תורים להצגה</div>
           </div>
         </section>
 
@@ -366,6 +415,57 @@
 
         <div class="modal-actions">
           <button class="secondary-button" type="button" data-close-modal="partModal">ביטול</button>
+          <button class="primary-button" type="submit">שמירה</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop hidden" id="appointmentModal" role="dialog" aria-modal="true" aria-labelledby="appointmentModalTitle">
+      <form class="modal compact-modal" id="appointmentForm">
+        <div class="modal-header">
+          <h2 id="appointmentModalTitle">הוספת תור</h2>
+          <button class="icon-button" type="button" data-close-modal="appointmentModal" aria-label="סגירה">×</button>
+        </div>
+
+        <div class="form-grid single">
+          <label>
+            תאריך
+            <input name="appointmentDate" type="date" required />
+          </label>
+          <label>
+            שעה
+            <input name="appointmentTime" type="time" />
+          </label>
+          <label>
+            שם הלקוח
+            <input name="customerName" type="text" required autocomplete="off" />
+          </label>
+          <label>
+            טלפון
+            <input name="phoneNumber" type="tel" required autocomplete="off" inputmode="tel" />
+          </label>
+          <label>
+            מספר רכב
+            <input name="vehiclePlate" type="text" autocomplete="off" />
+          </label>
+          <label>
+            סוג רכב
+            <input name="vehicleModel" type="text" autocomplete="off" />
+          </label>
+          <label>
+            סיבת הגעה
+            <input name="reason" type="text" autocomplete="off" placeholder="לדוגמה: טיפול 10,000 ק&quot;מ, החלפת בלמים" />
+          </label>
+          <label>
+            הערות
+            <textarea name="notes" rows="2"></textarea>
+          </label>
+        </div>
+
+        <p class="form-error hidden" id="appointmentError"></p>
+
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="appointmentModal">ביטול</button>
           <button class="primary-button" type="submit">שמירה</button>
         </div>
       </form>

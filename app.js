@@ -1,7 +1,7 @@
 "use strict";
 
 const DB_NAME = "topgear_offline_garage";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 const PART_CATEGORIES = [
   { id: "all", label: "הכל" },
@@ -21,14 +21,17 @@ const state = {
   jobs: [],
   inventory: [],
   customCategories: [],
+  appointments: [],
   activeView: "jobs",
   activeRange: "today",
   activeDeliveryRange: "upcoming",
+  activeAppointmentRange: "upcoming",
   activePartCategory: "all",
   activeInventoryCategory: "all",
   selectedPartId: null,
   editingJobId: null,
   editingPartId: null,
+  editingAppointmentId: null,
   draftParts: [],
   selectedJobRow: 0,
   selectedInventoryRow: 0
@@ -87,6 +90,7 @@ function cacheElements() {
     jobs: document.querySelector("#jobsView"),
     inventory: document.querySelector("#inventoryView"),
     deliveries: document.querySelector("#deliveriesView"),
+    appointments: document.querySelector("#appointmentsView"),
     backup: document.querySelector("#backupView")
   };
 
@@ -105,11 +109,25 @@ function cacheElements() {
   els.inventoryEmpty = document.querySelector("#inventoryEmpty");
   els.addPartButton = document.querySelector("#addPartButton");
   els.inventoryCategoryTabs = document.querySelector("#inventoryCategoryTabs");
+  els.inventoryTotalCost = document.querySelector("#inventoryTotalCost");
+  els.inventoryTotalSell = document.querySelector("#inventoryTotalSell");
+  els.inventoryTotalProfit = document.querySelector("#inventoryTotalProfit");
+  els.inventoryTotalUnits = document.querySelector("#inventoryTotalUnits");
 
   els.deliverySearch = document.querySelector("#deliverySearch");
   els.deliveriesBody = document.querySelector("#deliveriesBody");
   els.deliveriesEmpty = document.querySelector("#deliveriesEmpty");
   els.deliveryRangeButtons = Array.from(document.querySelectorAll("[data-delivery-range]"));
+
+  els.appointmentSearch = document.querySelector("#appointmentSearch");
+  els.appointmentsBody = document.querySelector("#appointmentsBody");
+  els.appointmentsEmpty = document.querySelector("#appointmentsEmpty");
+  els.appointmentRangeButtons = Array.from(document.querySelectorAll("[data-appointment-range]"));
+  els.addAppointmentButton = document.querySelector("#addAppointmentButton");
+  els.appointmentModal = document.querySelector("#appointmentModal");
+  els.appointmentForm = document.querySelector("#appointmentForm");
+  els.appointmentModalTitle = document.querySelector("#appointmentModalTitle");
+  els.appointmentError = document.querySelector("#appointmentError");
 
   els.jobModal = document.querySelector("#jobModal");
   els.jobForm = document.querySelector("#jobForm");
@@ -173,6 +191,17 @@ function bindEvents() {
       renderDeliveries();
     });
   });
+
+  els.appointmentSearch.addEventListener("input", renderAppointments);
+  els.appointmentRangeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeAppointmentRange = button.dataset.appointmentRange;
+      els.appointmentRangeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderAppointments();
+    });
+  });
+  els.addAppointmentButton.addEventListener("click", () => openAppointmentModal());
+  els.appointmentForm.addEventListener("submit", saveAppointmentFromForm);
   els.partPickerSearch.addEventListener("input", renderPartPicker);
   els.addJobButton.addEventListener("click", () => openJobModal());
   els.addPartButton.addEventListener("click", () => openPartModal());
@@ -253,6 +282,12 @@ function openDatabase() {
       if (!db.objectStoreNames.contains("categories")) {
         db.createObjectStore("categories", { keyPath: "id" });
       }
+
+      if (!db.objectStoreNames.contains("appointments")) {
+        const appointments = db.createObjectStore("appointments", { keyPath: "id", autoIncrement: true });
+        appointments.createIndex("appointmentDate", "appointmentDate", { unique: false });
+        appointments.createIndex("phoneNumber", "phoneNumber", { unique: false });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -282,14 +317,20 @@ async function getAll(storeName) {
 }
 
 async function refreshData() {
-  const [jobs, inventory, categories] = await Promise.all([
+  const [jobs, inventory, categories, appointments] = await Promise.all([
     getAll("jobs"),
     getAll("inventory"),
-    getAll("categories")
+    getAll("categories"),
+    getAll("appointments")
   ]);
   state.jobs = jobs.sort((a, b) => `${b.jobDate}${b.id}`.localeCompare(`${a.jobDate}${a.id}`));
   state.inventory = inventory.sort((a, b) => a.name.localeCompare(b.name, "he"));
   state.customCategories = categories.sort((a, b) => a.label.localeCompare(b.label, "he"));
+  state.appointments = appointments.sort((a, b) => {
+    const aKey = `${a.appointmentDate || ""}${a.appointmentTime || ""}`;
+    const bKey = `${b.appointmentDate || ""}${b.appointmentTime || ""}`;
+    return aKey.localeCompare(bKey);
+  });
 }
 
 function renderAll() {
@@ -298,6 +339,7 @@ function renderAll() {
   renderJobs();
   renderInventory();
   renderDeliveries();
+  renderAppointments();
   renderAnalytics();
 }
 
@@ -358,6 +400,7 @@ function switchView(view) {
     jobs: ["יומן עבודה", "מעקב תיקונים יומי, חלקים, חיובים ורווחיות"],
     inventory: ["ניהול מלאי חלקים", "קטלוג חלקים מקומי עם כמויות ומחירים"],
     deliveries: ["מסירות צפויות", "עבודות לפי תאריך מסירה עם סטטוס ואיחורים"],
+    appointments: ["תורים ופגישות", "תיאום הגעות עם פרטי לקוח, רכב וסיבת ההגעה"],
     backup: ["גיבוי וייצוא", "שמירת נתונים מקומית לקבצי גיבוי ו-CSV"]
   };
 
@@ -436,6 +479,8 @@ function renderInventory() {
     const haystack = normalizeSearch(`${part.sku} ${part.name} ${getPartCategoryLabel(part)}`);
     return haystack.includes(query);
   });
+
+  renderInventoryTotals(rows);
 
   els.inventoryBody.innerHTML = "";
   rows.forEach((part, index) => {
@@ -594,6 +639,202 @@ function isDeliveryInRange(days, range) {
     default:
       return days >= 0;
   }
+}
+
+function renderAppointments() {
+  const query = normalizeSearch(els.appointmentSearch.value);
+  const range = state.activeAppointmentRange || "upcoming";
+
+  const filtered = state.appointments.filter((appointment) => {
+    if (!isAppointmentInRange(appointment, range)) return false;
+    const haystack = normalizeSearch([
+      appointment.customerName,
+      appointment.phoneNumber,
+      appointment.vehiclePlate,
+      appointment.vehicleModel,
+      appointment.reason,
+      appointment.notes
+    ].join(" "));
+    return haystack.includes(query);
+  });
+
+  els.appointmentsBody.innerHTML = "";
+  filtered.forEach((appointment) => {
+    const days = getDaysUntil(appointment.appointmentDate);
+    const statusClass = getAppointmentStatusClass(days);
+    const statusLabel = getAppointmentStatusLabel(days);
+    const row = document.createElement("tr");
+    row.classList.add(`appointment-${statusClass}`);
+
+    const phoneHtml = appointment.phoneNumber
+      ? `<a href="tel:${escapeHtml(appointment.phoneNumber)}" class="phone-link">${escapeHtml(appointment.phoneNumber)}</a>`
+      : "";
+
+    row.innerHTML = `
+      <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
+      <td>${formatDate(appointment.appointmentDate)}</td>
+      <td>${escapeHtml(appointment.appointmentTime || "")}</td>
+      <td>${escapeHtml(appointment.customerName)}</td>
+      <td>${phoneHtml}</td>
+      <td>${escapeHtml(appointment.vehiclePlate || "")}</td>
+      <td>${escapeHtml(appointment.vehicleModel || "")}</td>
+      <td>${escapeHtml(appointment.reason || "")}</td>
+      <td class="notes-cell" title="${escapeHtml(appointment.notes || "")}">${escapeHtml(appointment.notes || "")}</td>
+      <td>
+        <span class="row-actions">
+          <button class="row-action" type="button" data-appointment-edit="${appointment.id}">עריכה</button>
+          <button class="row-action danger-action" type="button" data-appointment-delete="${appointment.id}">מחיקה</button>
+        </span>
+      </td>
+    `;
+
+    els.appointmentsBody.appendChild(row);
+  });
+
+  els.appointmentsBody.querySelectorAll("[data-appointment-edit]").forEach((button) => {
+    button.addEventListener("click", () => openAppointmentModal(Number(button.dataset.appointmentEdit)));
+  });
+  els.appointmentsBody.querySelectorAll("[data-appointment-delete]").forEach((button) => {
+    button.addEventListener("click", () => deleteAppointment(Number(button.dataset.appointmentDelete)));
+  });
+
+  els.appointmentsEmpty.classList.toggle("hidden", filtered.length > 0);
+}
+
+function isAppointmentInRange(appointment, range) {
+  const days = getDaysUntil(appointment.appointmentDate);
+  if (days === null) return range === "all";
+  switch (range) {
+    case "upcoming":
+      return days >= 0;
+    case "today":
+      return days === 0;
+    case "tomorrow":
+      return days === 1;
+    case "week":
+      return days >= 0 && days <= 7;
+    case "all":
+      return true;
+    default:
+      return days >= 0;
+  }
+}
+
+function getAppointmentStatusClass(days) {
+  if (days === null) return "later";
+  if (days < 0) return "overdue";
+  if (days === 0) return "today";
+  if (days === 1) return "soon";
+  if (days <= 7) return "week";
+  return "later";
+}
+
+function getAppointmentStatusLabel(days) {
+  if (days === null) return "ללא תאריך";
+  if (days < 0) return "עבר";
+  if (days === 0) return "היום";
+  if (days === 1) return "מחר";
+  if (days <= 7) return "השבוע";
+  return "בהמשך";
+}
+
+function openAppointmentModal(appointmentId = null) {
+  state.editingAppointmentId = appointmentId;
+  clearError(els.appointmentError);
+  els.appointmentForm.reset();
+
+  if (appointmentId) {
+    const appointment = state.appointments.find((item) => item.id === appointmentId);
+    if (!appointment) return;
+
+    els.appointmentModalTitle.textContent = "עריכת תור";
+    els.appointmentForm.elements.appointmentDate.value = appointment.appointmentDate || "";
+    els.appointmentForm.elements.appointmentTime.value = appointment.appointmentTime || "";
+    els.appointmentForm.elements.customerName.value = appointment.customerName || "";
+    els.appointmentForm.elements.phoneNumber.value = appointment.phoneNumber || "";
+    els.appointmentForm.elements.vehiclePlate.value = appointment.vehiclePlate || "";
+    els.appointmentForm.elements.vehicleModel.value = appointment.vehicleModel || "";
+    els.appointmentForm.elements.reason.value = appointment.reason || "";
+    els.appointmentForm.elements.notes.value = appointment.notes || "";
+  } else {
+    els.appointmentModalTitle.textContent = "הוספת תור";
+    els.appointmentForm.elements.appointmentDate.value = toIsoDate(new Date());
+  }
+
+  openModal("appointmentModal");
+  requestAnimationFrame(() => els.appointmentForm.elements.customerName.focus());
+}
+
+async function saveAppointmentFromForm(event) {
+  event.preventDefault();
+  clearError(els.appointmentError);
+
+  const form = new FormData(els.appointmentForm);
+  const appointment = {
+    appointmentDate: String(form.get("appointmentDate") || "").trim(),
+    appointmentTime: String(form.get("appointmentTime") || "").trim(),
+    customerName: String(form.get("customerName") || "").trim(),
+    phoneNumber: String(form.get("phoneNumber") || "").trim(),
+    vehiclePlate: String(form.get("vehiclePlate") || "").trim(),
+    vehicleModel: String(form.get("vehicleModel") || "").trim(),
+    reason: String(form.get("reason") || "").trim(),
+    notes: String(form.get("notes") || "").trim(),
+    updatedAt: new Date().toISOString()
+  };
+
+  if (!appointment.appointmentDate) {
+    showError(els.appointmentError, "תאריך הוא שדה חובה");
+    return;
+  }
+  if (!appointment.customerName) {
+    showError(els.appointmentError, "שם הלקוח הוא שדה חובה");
+    return;
+  }
+  if (!appointment.phoneNumber) {
+    showError(els.appointmentError, "מספר טלפון הוא שדה חובה");
+    return;
+  }
+
+  try {
+    await saveAppointment(appointment, state.editingAppointmentId);
+    await refreshData();
+    renderAppointments();
+    closeModal("appointmentModal");
+    showToast(state.editingAppointmentId ? "התור עודכן" : "תור נוסף ליומן");
+  } catch (error) {
+    console.error(error);
+    showError(els.appointmentError, error.message || "שגיאה בשמירת התור");
+  }
+}
+
+async function saveAppointment(appointment, appointmentId = null) {
+  const transaction = state.db.transaction("appointments", "readwrite");
+  const store = transaction.objectStore("appointments");
+  const now = new Date().toISOString();
+
+  if (appointmentId) {
+    const existing = await idbRequest(store.get(appointmentId));
+    if (!existing) throw new Error("התור לא נמצא");
+    store.put({ ...existing, ...appointment, id: appointmentId, updatedAt: now });
+  } else {
+    store.add({ ...appointment, createdAt: now, updatedAt: now });
+  }
+
+  await transactionDone(transaction);
+}
+
+async function deleteAppointment(appointmentId) {
+  const appointment = state.appointments.find((item) => item.id === appointmentId);
+  if (!appointment) return;
+  if (!confirm(`למחוק את התור של ${appointment.customerName}?`)) return;
+
+  const transaction = state.db.transaction("appointments", "readwrite");
+  transaction.objectStore("appointments").delete(appointmentId);
+  await transactionDone(transaction);
+
+  await refreshData();
+  renderAppointments();
+  showToast("התור נמחק");
 }
 
 function renderAnalytics() {
@@ -755,6 +996,16 @@ function beginInlineCategoryAdd(triggerButton) {
 
   triggerButton.replaceWith(input);
   input.focus();
+}
+
+function renderInventoryTotals(parts) {
+  const totalCost = parts.reduce((sum, p) => sum + Number(p.garageCost || 0) * Number(p.quantity || 0), 0);
+  const totalSell = parts.reduce((sum, p) => sum + Number(p.customerPrice || 0) * Number(p.quantity || 0), 0);
+  const totalUnits = parts.reduce((sum, p) => sum + Number(p.quantity || 0), 0);
+  els.inventoryTotalCost.textContent = formatCurrency(totalCost);
+  els.inventoryTotalSell.textContent = formatCurrency(totalSell);
+  els.inventoryTotalProfit.textContent = formatCurrency(totalSell - totalCost);
+  els.inventoryTotalUnits.textContent = String(totalUnits);
 }
 
 function renderInventoryCategoryTabs() {
@@ -1373,10 +1624,11 @@ function exportJson() {
   const payload = {
     app: "TopGear",
     exportedAt: new Date().toISOString(),
-    version: 2,
+    version: 3,
     jobs: state.jobs,
     inventory: state.inventory,
-    customCategories: state.customCategories
+    customCategories: state.customCategories,
+    appointments: state.appointments
   };
   downloadFile(`topgear-backup-${toIsoDate(new Date())}.json`, JSON.stringify(payload, null, 2), "application/json");
   showToast("קובץ JSON נשמר");
@@ -1448,7 +1700,12 @@ async function importJson(event) {
       return;
     }
 
-    await replaceAllData(payload.jobs, payload.inventory, Array.isArray(payload.customCategories) ? payload.customCategories : []);
+    await replaceAllData(
+      payload.jobs,
+      payload.inventory,
+      Array.isArray(payload.customCategories) ? payload.customCategories : [],
+      Array.isArray(payload.appointments) ? payload.appointments : []
+    );
     await refreshData();
     renderAll();
     showToast("הגיבוי יובא בהצלחה");
@@ -1460,15 +1717,17 @@ async function importJson(event) {
   }
 }
 
-async function replaceAllData(jobs, inventory, customCategories = []) {
-  const transaction = state.db.transaction(["jobs", "inventory", "categories"], "readwrite");
+async function replaceAllData(jobs, inventory, customCategories = [], appointments = []) {
+  const transaction = state.db.transaction(["jobs", "inventory", "categories", "appointments"], "readwrite");
   const jobsStore = transaction.objectStore("jobs");
   const inventoryStore = transaction.objectStore("inventory");
   const categoriesStore = transaction.objectStore("categories");
+  const appointmentsStore = transaction.objectStore("appointments");
 
   jobsStore.clear();
   inventoryStore.clear();
   categoriesStore.clear();
+  appointmentsStore.clear();
 
   for (const category of customCategories) {
     if (!category?.id || !category?.label) continue;
@@ -1478,6 +1737,24 @@ async function replaceAllData(jobs, inventory, customCategories = []) {
       custom: true,
       createdAt: category.createdAt || new Date().toISOString()
     });
+  }
+
+  for (const appointment of appointments) {
+    if (!appointment?.appointmentDate || !appointment?.customerName) continue;
+    const record = {
+      appointmentDate: String(appointment.appointmentDate || ""),
+      appointmentTime: String(appointment.appointmentTime || ""),
+      customerName: String(appointment.customerName || ""),
+      phoneNumber: String(appointment.phoneNumber || ""),
+      vehiclePlate: String(appointment.vehiclePlate || ""),
+      vehicleModel: String(appointment.vehicleModel || ""),
+      reason: String(appointment.reason || ""),
+      notes: String(appointment.notes || ""),
+      createdAt: appointment.createdAt || new Date().toISOString(),
+      updatedAt: appointment.updatedAt || new Date().toISOString()
+    };
+    if (appointment.id !== undefined && appointment.id !== null) record.id = appointment.id;
+    appointmentsStore.put(record);
   }
 
   for (const part of inventory) {
@@ -1550,6 +1827,7 @@ function closeModal(id) {
 function closeAllModals() {
   closeModal("jobModal");
   closeModal("partModal");
+  closeModal("appointmentModal");
 }
 
 function showError(element, message) {

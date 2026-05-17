@@ -212,6 +212,11 @@ h1 {
   margin-bottom: 14px;
 }
 
+.analytics-band.inventory-band {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+  margin-top: 14px;
+}
+
 .range-switch,
 .metric,
 .backup-panel {
@@ -904,6 +909,25 @@ input.part-category-button.add-category-input:focus {
   .nav-button span {
     display: none;
   }
+}
+
+.phone-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  direction: ltr;
+  unicode-bidi: embed;
+}
+
+.phone-link:hover {
+  text-decoration: underline;
+}
+
+.notes-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .delivery-badge {
