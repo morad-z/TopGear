@@ -38,6 +38,13 @@ jobs:
       - name: Generate Tauri icons from logo
         run: npx --yes @tauri-apps/cli@latest icon assets/topgear-square.png
 
+      - name: Stage frontend dist
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item index.html, app.js, styles.css -Destination dist
+          Copy-Item -Recurse -Force assets -Destination dist/assets
+
       - name: Build & release Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

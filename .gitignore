@@ -4,6 +4,10 @@ src-tauri/Cargo.lock
 src-tauri/gen/schemas/
 src-tauri/icons/
 
+# Built / staged frontend
+dist/
+assets/topgear-square.png
+
 # Node
 node_modules/
 
