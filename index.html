@@ -98,6 +98,7 @@
                   <th>מחיר חלקים למוסך</th>
                   <th>מחיר חלקים ללקוח</th>
                   <th>מחיר עבודה</th>
+                  <th>מע"מ</th>
                   <th>סה"כ</th>
                   <th>רווח</th>
                   <th>תאריך מסירה</th>
@@ -361,10 +362,24 @@
           <div class="selected-parts" id="selectedParts"></div>
         </section>
 
+        <div class="tax-controls">
+          <label class="checkbox-line">
+            <input type="checkbox" id="taxEnabled" name="taxEnabled" checked />
+            <span>כלול מע"מ בחשבון ללקוח</span>
+          </label>
+          <label class="tax-rate-field">
+            אחוז מע"מ
+            <input type="number" id="taxRate" name="taxRate" min="0" max="100" step="0.5" value="18" />
+            <span aria-hidden="true">%</span>
+          </label>
+        </div>
+
         <div class="totals-strip">
           <span>עלות חלקים: <strong id="draftPartsCost">₪0</strong></span>
           <span>מחיר חלקים ללקוח: <strong id="draftPartsPrice">₪0</strong></span>
-          <span>סה"כ: <strong id="draftTotal">₪0</strong></span>
+          <span>סה"כ לפני מע"מ: <strong id="draftSubtotal">₪0</strong></span>
+          <span class="tax-line" id="draftTaxLine">מע"מ (<span id="draftTaxRateLabel">18</span>%): <strong id="draftTaxAmount">₪0</strong></span>
+          <span>סה"כ לתשלום: <strong id="draftTotal">₪0</strong></span>
           <span>רווח: <strong id="draftProfit">₪0</strong></span>
         </div>
 

@@ -152,8 +152,14 @@ function cacheElements() {
   els.selectedParts = document.querySelector("#selectedParts");
   els.draftPartsCost = document.querySelector("#draftPartsCost");
   els.draftPartsPrice = document.querySelector("#draftPartsPrice");
+  els.draftSubtotal = document.querySelector("#draftSubtotal");
+  els.draftTaxLine = document.querySelector("#draftTaxLine");
+  els.draftTaxRateLabel = document.querySelector("#draftTaxRateLabel");
+  els.draftTaxAmount = document.querySelector("#draftTaxAmount");
   els.draftTotal = document.querySelector("#draftTotal");
   els.draftProfit = document.querySelector("#draftProfit");
+  els.taxEnabled = document.querySelector("#taxEnabled");
+  els.taxRate = document.querySelector("#taxRate");
 
   els.partModal = document.querySelector("#partModal");
   els.partForm = document.querySelector("#partForm");
@@ -440,6 +446,7 @@ function renderJobs() {
       <td class="numeric">${formatCurrency(totals.partsCost)}</td>
       <td class="numeric">${formatCurrency(totals.partsPrice)}</td>
       <td class="numeric">${formatCurrency(job.laborPrice || 0)}</td>
+      <td>${renderTaxCell(totals)}</td>
       <td class="numeric">${formatCurrency(totals.total)}</td>
       <td class="numeric">${formatCurrency(totals.profit)}</td>
       <td>${formatDate(job.deliveryDate)}</td>
@@ -843,7 +850,7 @@ function renderAnalytics() {
     (sum, job) => {
       if (!isDateInRange(job.jobDate, start, end)) return sum;
       const jobTotals = getJobTotals(job);
-      sum.revenue += jobTotals.total;
+      sum.revenue += jobTotals.subtotal;
       sum.cost += jobTotals.partsCost;
       sum.profit += jobTotals.profit;
       return sum;
@@ -1058,6 +1065,8 @@ function openJobModal(jobId = null) {
   const today = toIsoDate(new Date());
   els.jobForm.elements.jobDate.value = today;
   els.jobForm.elements.laborPrice.value = "0";
+  els.taxEnabled.checked = true;
+  els.taxRate.value = "18";
 
   if (jobId) {
     const job = state.jobs.find((item) => item.id === jobId);
@@ -1072,6 +1081,8 @@ function openJobModal(jobId = null) {
     els.jobForm.elements.ownerName.value = job.ownerName || "";
     els.jobForm.elements.laborPrice.value = String(job.laborPrice || 0);
     els.jobForm.elements.deliveryDate.value = job.deliveryDate || "";
+    els.taxEnabled.checked = Boolean(job.taxEnabled);
+    els.taxRate.value = String(job.taxRate ?? 18);
     state.draftParts = structuredClone(job.parts || []);
   } else {
     els.jobModalTitle.textContent = "הוספת עבודה";
@@ -1294,9 +1305,15 @@ function renderDraftParts() {
 
 function renderDraftTotals() {
   const laborPrice = toMoney(els.jobForm.elements.laborPrice.value);
-  const totals = getPartsTotals(state.draftParts, laborPrice);
+  const taxEnabled = els.taxEnabled?.checked || false;
+  const taxRate = Number(els.taxRate?.value) || 0;
+  const totals = getPartsTotals(state.draftParts, laborPrice, taxEnabled, taxRate);
   els.draftPartsCost.textContent = formatCurrency(totals.partsCost);
   els.draftPartsPrice.textContent = formatCurrency(totals.partsPrice);
+  els.draftSubtotal.textContent = formatCurrency(totals.subtotal);
+  els.draftTaxAmount.textContent = formatCurrency(totals.taxAmount);
+  els.draftTaxRateLabel.textContent = String(taxRate);
+  els.draftTaxLine.classList.toggle("hidden", !taxEnabled);
   els.draftTotal.textContent = formatCurrency(totals.total);
   els.draftProfit.textContent = formatCurrency(totals.profit);
 }
@@ -1305,7 +1322,12 @@ elsReadyForLaborTotals();
 
 function elsReadyForLaborTotals() {
   document.addEventListener("input", (event) => {
-    if (event.target?.name === "laborPrice") {
+    if (event.target?.name === "laborPrice" || event.target?.id === "taxRate") {
+      renderDraftTotals();
+    }
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target?.id === "taxEnabled") {
       renderDraftTotals();
     }
   });
@@ -1327,6 +1349,8 @@ async function saveJobFromForm(event) {
     laborPrice: toMoney(form.get("laborPrice")),
     deliveryDate: String(form.get("deliveryDate") || ""),
     parts: structuredClone(state.draftParts),
+    taxEnabled: els.taxEnabled.checked,
+    taxRate: Number(els.taxRate.value) || 0,
     updatedAt: new Date().toISOString()
   };
 
@@ -1539,17 +1563,36 @@ async function deletePart(partId) {
   showToast("החלק נמחק מהמלאי");
 }
 
-function getJobTotals(job) {
-  return getPartsTotals(job.parts || [], Number(job.laborPrice) || 0);
+function renderTaxCell(totals) {
+  if (totals.taxEnabled) {
+    return `<span class="tax-badge included" title="מע&quot;מ של ${totals.taxRate}% נוסף לסה&quot;כ (${formatCurrency(totals.taxAmount)})">כלול ${totals.taxRate}%</span>`;
+  }
+  return `<span class="tax-badge excluded" title="ללא מע&quot;מ">ללא</span>`;
 }
 
-function getPartsTotals(parts, laborPrice = 0) {
+function getJobTotals(job) {
+  return getPartsTotals(
+    job.parts || [],
+    Number(job.laborPrice) || 0,
+    Boolean(job.taxEnabled),
+    Number(job.taxRate) || 0
+  );
+}
+
+function getPartsTotals(parts, laborPrice = 0, taxEnabled = false, taxRate = 0) {
   const partsCost = parts.reduce((sum, part) => sum + Number(part.garageCostSnapshot || 0) * Number(part.quantityUsed || 0), 0);
   const partsPrice = parts.reduce((sum, part) => sum + Number(part.customerPriceSnapshot || 0) * Number(part.quantityUsed || 0), 0);
+  const subtotal = partsPrice + laborPrice;
+  const taxAmount = taxEnabled ? subtotal * (Number(taxRate) || 0) / 100 : 0;
+  const total = subtotal + taxAmount;
   return {
     partsCost,
     partsPrice,
-    total: partsPrice + laborPrice,
+    subtotal,
+    taxEnabled,
+    taxRate: Number(taxRate) || 0,
+    taxAmount,
+    total,
     profit: partsPrice - partsCost + laborPrice
   };
 }
@@ -1647,7 +1690,10 @@ function exportJobsCsv() {
     "מחיר חלקים למוסך",
     "מחיר חלקים ללקוח",
     "מחיר עבודה",
-    "סה\"כ",
+    "סה\"כ לפני מע\"מ",
+    "אחוז מע\"מ",
+    "מע\"מ",
+    "סה\"כ לתשלום",
     "רווח",
     "תאריך מסירה"
   ];
@@ -1666,6 +1712,9 @@ function exportJobsCsv() {
       totals.partsCost,
       totals.partsPrice,
       job.laborPrice,
+      totals.subtotal,
+      totals.taxEnabled ? totals.taxRate : 0,
+      totals.taxAmount,
       totals.total,
       totals.profit,
       job.deliveryDate

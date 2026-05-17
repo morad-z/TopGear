@@ -930,6 +930,84 @@ input.part-category-button.add-category-input:focus {
   white-space: nowrap;
 }
 
+.tax-controls {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+}
+
+.tax-controls .checkbox-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.tax-controls .checkbox-line input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.tax-controls .tax-rate-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.tax-controls .tax-rate-field input[type="number"] {
+  width: 70px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.totals-strip .tax-line {
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
+.totals-strip .tax-line.hidden {
+  display: none;
+}
+
+.tax-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.tax-badge.included {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.tax-badge.excluded {
+  background: #eef0f4;
+  color: #4b5563;
+  border-color: #d1d5db;
+}
+
 .delivery-badge {
   display: inline-flex;
   align-items: center;
