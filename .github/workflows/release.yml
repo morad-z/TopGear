@@ -30,8 +30,13 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Pad logo to a square 1024x1024 PNG
+        shell: pwsh
+        run: |
+          magick assets/topgear.png -background none -gravity center -resize 1024x1024 -extent 1024x1024 assets/topgear-square.png
+
       - name: Generate Tauri icons from logo
-        run: npx --yes @tauri-apps/cli@latest icon assets/topgear.png
+        run: npx --yes @tauri-apps/cli@latest icon assets/topgear-square.png
 
       - name: Build & release Tauri app
         uses: tauri-apps/tauri-action@v0
