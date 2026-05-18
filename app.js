@@ -3027,13 +3027,27 @@ function renderInvoiceHtml(job) {
   const jobDate = formatDate(job.jobDate);
   let title;
   if (isQuote) {
-    title = "הצעת מחיר";
+    title = "כרטיס עבודה / הצעת מחיר";
   } else {
     title = totals.taxEnabled ? "חשבונית מס" : "חשבונית";
   }
   const numberLabel = isQuote ? "מספר הצעה" : "מספר חשבונית";
   const dateLabel = isQuote ? "תאריך הצעה" : "תאריך הפקה";
   const workLabel = isQuote ? "תאריך הביקור" : "תאריך עבודה";
+
+  // Job context block: mileage / notes / follow-up date. Only render when at
+  // least one field has data so regular invoices for simple jobs stay tidy.
+  const hasJobMeta = Boolean(job.mileage || (job.notes && job.notes.trim()) || job.followUpDate);
+  const jobMetaSection = hasJobMeta
+    ? `
+      <section class="inv-job-meta-section">
+        <div class="inv-section-label">הערות ומעקב</div>
+        ${job.mileage ? `<div class="inv-job-meta-line"><span class="inv-job-meta-key">ק"מ ברכב:</span> <strong>${Number(job.mileage).toLocaleString("he-IL")}</strong></div>` : ""}
+        ${job.notes && job.notes.trim() ? `<div class="inv-job-meta-line inv-job-meta-notes"><span class="inv-job-meta-key">הערות הביקור:</span> ${escapeHtml(job.notes)}</div>` : ""}
+        ${job.followUpDate ? `<div class="inv-job-meta-line"><span class="inv-job-meta-key">מועד מומלץ לחזרה:</span> <strong>${escapeHtml(formatDate(job.followUpDate))}</strong></div>` : ""}
+      </section>
+    `
+    : "";
 
   const lineItems = (job.parts || []).map((p, idx) => {
     const lineTotal = Number(p.customerPriceSnapshot || 0) * Number(p.quantityUsed || 0);
@@ -3088,6 +3102,8 @@ function renderInvoiceHtml(job) {
           רכב: <strong>${escapeHtml(job.vehiclePlate || "")}</strong>${job.vehicleModel ? " · " + escapeHtml(job.vehicleModel) : ""}${job.vehicleYear ? " · שנת ייצור " + job.vehicleYear : ""}${job.engineDisplacement ? ` · ${job.engineDisplacement} סמ"ק` : ""}
         </div>
       </section>
+
+      ${jobMetaSection}
 
       <table class="inv-items">
         <thead>
