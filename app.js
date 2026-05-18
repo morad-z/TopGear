@@ -2487,13 +2487,22 @@ function exportJobsCsv() {
     "מע\"מ",
     "סה\"כ לתשלום",
     "רווח",
-    "תאריך מסירה",
+    "סטטוס",
+    "תאריך מסירה מתוכנן",
+    "תאריך מסירה בפועל",
     "הערות",
     "מועד חזרה מומלץ"
   ];
 
   const rows = state.jobs.map((job) => {
     const totals = getJobTotals(job);
+    // Status reflects the same eligibility logic the analytics banner uses,
+    // so anyone analysing the CSV in Excel can filter "נמסר" rows to match
+    // the realised-revenue totals shown in the app.
+    let status;
+    if (job.isQuote) status = "הצעת מחיר";
+    else if (job.deliveredAt) status = "נמסר";
+    else status = "פתוח";
     return [
       job.jobDate,
       getHebrewDay(job.jobDate),
@@ -2513,7 +2522,9 @@ function exportJobsCsv() {
       totals.taxAmount,
       totals.total,
       totals.profit,
-      job.deliveryDate,
+      status,
+      job.deliveryDate || "",
+      job.deliveredAt ? toIsoDate(new Date(job.deliveredAt)) : "",
       job.notes || "",
       job.followUpDate || ""
     ];
