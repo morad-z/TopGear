@@ -281,6 +281,7 @@ function cacheElements() {
   els.draftProfit = document.querySelector("#draftProfit");
   els.taxEnabled = document.querySelector("#taxEnabled");
   els.taxRate = document.querySelector("#taxRate");
+  els.isQuote = document.querySelector("#isQuote");
 
   els.partModal = document.querySelector("#partModal");
   els.partForm = document.querySelector("#partForm");
@@ -417,6 +418,9 @@ function bindEvents() {
   els.importJsonInput.addEventListener("change", importJson);
   els.businessSettingsForm.addEventListener("submit", saveBusinessFromForm);
   els.invoicePrintButton.addEventListener("click", printInvoiceWithFilename);
+  // Safety net: the iframe-based print flow does not mutate the main window's
+  // document.title, but the fallback path (if the iframe is denied for any
+  // reason) does. Restore the original title whenever a print dialog closes.
   window.addEventListener("afterprint", () => {
     if (document.title !== "TopGear - ניהול מוסך") {
       document.title = "TopGear - ניהול מוסך";
@@ -750,7 +754,30 @@ function sendWhatsapp() {
   if (!phone) { showToast("מספר טלפון חסר או לא תקין"); return; }
   if (!msg) { showToast("ההודעה ריקה"); return; }
   const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
-  window.open(url, "_blank", "noopener");
+  openExternalUrl(url);
+  showToast("נפתח חלון WhatsApp — לחץ Send שם");
+}
+
+function openExternalUrl(url) {
+  // Tauri v2 — use the shell/opener plugin when running inside the desktop app
+  if (window.__TAURI__?.opener?.openUrl) {
+    window.__TAURI__.opener.openUrl(url).catch((err) => console.warn("opener.openUrl failed:", err));
+    return;
+  }
+  if (window.__TAURI__?.shell?.open) {
+    window.__TAURI__.shell.open(url).catch((err) => console.warn("shell.open failed:", err));
+    return;
+  }
+  // Browser fallback — synthesize an anchor click. Browsers reliably allow
+  // this pattern for user-initiated link navigation, unlike window.open()
+  // which is often popup-blocked even from click handlers.
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function downloadInvoiceForWhatsapp() {
@@ -860,6 +887,9 @@ function renderJobs() {
   const filter = state.activeJobsFilter || "open";
   const rows = state.jobs.filter((job) => {
     const isDelivered = Boolean(job.deliveredAt);
+    const isQuote = Boolean(job.isQuote);
+    if (filter === "quote" && !isQuote) return false;
+    if (filter !== "quote" && filter !== "all" && isQuote) return false;
     if (filter === "open" && isDelivered) return false;
     if (filter === "delivered" && !isDelivered) return false;
     const haystack = normalizeSearch([
@@ -876,18 +906,22 @@ function renderJobs() {
   rows.forEach((job, index) => {
     const totals = getJobTotals(job);
     const isDelivered = Boolean(job.deliveredAt);
+    const isQuote = Boolean(job.isQuote);
     const row = document.createElement("tr");
     row.tabIndex = 0;
     row.dataset.rowIndex = String(index);
     row.classList.toggle("selected", index === state.selectedJobRow);
     row.classList.toggle("job-delivered", isDelivered);
+    row.classList.toggle("job-quote", isQuote);
 
-    const deliverButton = isDelivered
+    const deliverButton = isQuote
+      ? `<button class="row-action success-action" type="button" data-job-approve="${job.id}">✓ אשר וצור עבודה</button>`
+      : isDelivered
       ? `<button class="row-action" type="button" data-job-reopen="${job.id}">↩ החזר לפתוח</button>`
       : `<button class="row-action success-action" type="button" data-job-deliver="${job.id}">✓ סמן כנמסר</button>`;
 
     row.innerHTML = `
-      <td>${formatDate(job.jobDate)}</td>
+      <td>${formatDate(job.jobDate)}${isQuote ? ' <span class="quote-badge">הצעה</span>' : ''}</td>
       <td>${getHebrewDay(job.jobDate)}</td>
       <td><button type="button" class="plate-link" data-vehicle-history="${escapeHtml(job.vehiclePlate)}">${escapeHtml(job.vehiclePlate)}</button></td>
       <td>${escapeHtml(job.vehicleModel || "")}</td>
@@ -936,6 +970,9 @@ function renderJobs() {
   els.jobsBody.querySelectorAll("[data-job-invoice]").forEach((button) => {
     button.addEventListener("click", () => openInvoiceForJob(Number(button.dataset.jobInvoice)));
   });
+  els.jobsBody.querySelectorAll("[data-job-approve]").forEach((button) => {
+    button.addEventListener("click", () => approveQuote(Number(button.dataset.jobApprove)));
+  });
 
   els.jobsEmpty.classList.toggle("hidden", rows.length > 0);
 }
@@ -953,6 +990,31 @@ async function markJobDelivered(jobId) {
   renderJobs();
   renderDeliveries();
   showToast(`העבודה ${job.vehiclePlate} סומנה כנמסרה`);
+}
+
+async function approveQuote(jobId) {
+  const quote = state.jobs.find((j) => j.id === jobId);
+  if (!quote || !quote.isQuote) return;
+  if (!confirm(`אישור הצעת המחיר עבור ${quote.vehiclePlate || quote.ownerName} — החלקים יורדו מהמלאי וההצעה תהפוך לעבודה פעילה. להמשיך?`)) return;
+
+  // Check inventory availability before flipping
+  const validationError = validateJobParts(quote.parts, false);
+  if (validationError) {
+    showToast(`לא ניתן לאשר: ${validationError}`);
+    return;
+  }
+
+  const updated = { ...quote, isQuote: false };
+  try {
+    await saveJobWithInventoryTransaction(updated, jobId);
+    await syncFollowUpAppointment(jobId, updated);
+    await refreshData();
+    renderAll();
+    showToast(`ההצעה אושרה והפכה לעבודה פעילה — המלאי עודכן`);
+  } catch (error) {
+    console.error(error);
+    showToast(error.message || "שגיאה באישור ההצעה");
+  }
 }
 
 async function markJobReopened(jobId) {
@@ -1178,6 +1240,10 @@ function renderAppointments() {
       ? `<a href="tel:${escapeHtml(appointment.phoneNumber)}" class="phone-link">${escapeHtml(appointment.phoneNumber)}</a>`
       : "";
 
+    const autoFollowUpBadge = appointment.sourceJobId
+      ? ' <small class="auto-followup-badge" title="נוצר אוטומטית מתאריך חזרה של עבודה">🔁 מעקב</small>'
+      : '';
+
     const arriveButtonHtml = arrived
       ? `<button class="row-action" type="button" data-appointment-revert="${appointment.id}">↩ סמן כלא הגיע</button>`
       : `<button class="row-action success-action" type="button" data-appointment-arrive="${appointment.id}">✓ הגיע - פתח עבודה</button>`;
@@ -1186,7 +1252,7 @@ function renderAppointments() {
       <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
       <td>${formatDate(appointment.appointmentDate)}</td>
       <td>${escapeHtml(appointment.appointmentTime || "")}</td>
-      <td>${escapeHtml(appointment.customerName)}</td>
+      <td>${escapeHtml(appointment.customerName)}${autoFollowUpBadge}</td>
       <td>${phoneHtml}</td>
       <td>${appointment.vehiclePlate ? `<button type="button" class="plate-link" data-vehicle-history="${escapeHtml(appointment.vehiclePlate)}">${escapeHtml(appointment.vehiclePlate)}</button>` : ""}</td>
       <td>${escapeHtml(appointment.vehicleModel || "")}</td>
@@ -1603,6 +1669,7 @@ function openJobModal(jobId = null, prefillAppointment = null) {
   els.jobForm.elements.laborPrice.value = "0";
   els.taxEnabled.checked = true;
   els.taxRate.value = String(state.business?.defaultTaxRate ?? 18);
+  els.isQuote.checked = false;
 
   if (jobId) {
     const job = state.jobs.find((item) => item.id === jobId);
@@ -1616,10 +1683,14 @@ function openJobModal(jobId = null, prefillAppointment = null) {
     els.jobForm.elements.engineDisplacement.value = job.engineDisplacement || "";
     els.jobForm.elements.ownerName.value = job.ownerName || "";
     els.jobForm.elements.phoneNumber.value = job.phoneNumber || "";
+    els.jobForm.elements.mileage.value = job.mileage ? String(job.mileage) : "";
     els.jobForm.elements.laborPrice.value = String(job.laborPrice || 0);
     els.jobForm.elements.deliveryDate.value = job.deliveryDate || "";
+    els.jobForm.elements.notes.value = job.notes || "";
+    els.jobForm.elements.followUpDate.value = job.followUpDate || "";
     els.taxEnabled.checked = Boolean(job.taxEnabled);
     els.taxRate.value = String(job.taxRate ?? 18);
+    els.isQuote.checked = Boolean(job.isQuote);
     state.draftParts = structuredClone(job.parts || []);
   } else {
     els.jobModalTitle.textContent = "הוספת עבודה";
@@ -1926,6 +1997,45 @@ function elsReadyForLaborTotals() {
   });
 }
 
+async function syncFollowUpAppointment(jobId, job) {
+  if (!jobId) return;
+  const tx = state.db.transaction("appointments", "readwrite");
+  const store = tx.objectStore("appointments");
+  const all = await idbRequest(store.getAll());
+  const existing = all.find((a) => a.sourceJobId === jobId);
+  const wantsFollowUp = Boolean(job.followUpDate);
+  const now = new Date().toISOString();
+
+  if (!wantsFollowUp) {
+    if (existing) store.delete(existing.id);
+    await transactionDone(tx);
+    return;
+  }
+
+  const apptData = {
+    appointmentDate: job.followUpDate,
+    appointmentTime: "",
+    customerName: job.ownerName || "",
+    phoneNumber: job.phoneNumber || "",
+    vehiclePlate: job.vehiclePlate || "",
+    vehicleModel: job.vehicleModel || "",
+    reason: "ביקור חוזר / מעקב",
+    notes: job.notes || "",
+    sourceJobId: jobId,
+    updatedAt: now
+  };
+
+  if (existing) {
+    // Preserve arrivedAt if user already marked it (don't undo their action)
+    const preserved = { ...existing, ...apptData, id: existing.id };
+    if (existing.arrivedAt) preserved.arrivedAt = existing.arrivedAt;
+    store.put(preserved);
+  } else {
+    store.add({ ...apptData, createdAt: now });
+  }
+  await transactionDone(tx);
+}
+
 async function saveJobFromForm(event) {
   event.preventDefault();
   clearError(els.jobError);
@@ -1940,11 +2050,15 @@ async function saveJobFromForm(event) {
     engineDisplacement: toOptionalInt(form.get("engineDisplacement")),
     ownerName: String(form.get("ownerName") || "").trim(),
     phoneNumber: String(form.get("phoneNumber") || "").trim(),
+    mileage: toOptionalInt(form.get("mileage")),
     laborPrice: toMoney(form.get("laborPrice")),
     deliveryDate: String(form.get("deliveryDate") || ""),
+    notes: String(form.get("notes") || "").trim(),
+    followUpDate: String(form.get("followUpDate") || ""),
     parts: structuredClone(state.draftParts),
     taxEnabled: els.taxEnabled.checked,
     taxRate: Number(els.taxRate.value) || 0,
+    isQuote: els.isQuote.checked,
     updatedAt: new Date().toISOString()
   };
 
@@ -1953,14 +2067,15 @@ async function saveJobFromForm(event) {
     return;
   }
 
-  const validationError = validateJobParts(job.parts);
+  const validationError = validateJobParts(job.parts, job.isQuote);
   if (validationError) {
     showError(els.jobError, validationError);
     return;
   }
 
   try {
-    await saveJobWithInventoryTransaction(job, state.editingJobId);
+    const savedJobId = await saveJobWithInventoryTransaction(job, state.editingJobId);
+    await syncFollowUpAppointment(savedJobId, job);
     const convertedAppointmentId = state.appointmentBeingConverted;
     if (convertedAppointmentId) {
       try {
@@ -1988,7 +2103,17 @@ async function saveJobFromForm(event) {
   }
 }
 
-function validateJobParts(parts) {
+function validateJobParts(parts, isQuote = false) {
+  if (isQuote) {
+    // For a quote we only sanity-check the line items; no inventory enforcement.
+    for (const part of parts || []) {
+      if (!part.partId && !part.temporary) return "אחד החלקים בעבודה אינו קיים במלאי";
+      if (Number(part.quantityUsed || 0) <= 0) return "כמות חלק חייבת להיות גדולה מ-0";
+      if (Number(part.customerPriceSnapshot || 0) <= 0) return `יש לעדכן מחיר ללקוח עבור ${part.nameSnapshot}`;
+    }
+    return "";
+  }
+
   const requiredByPart = new Map();
 
   for (const part of parts || []) {
@@ -2020,14 +2145,25 @@ async function saveJobWithInventoryTransaction(job, existingJobId) {
   const existingJob = existingJobId ? await idbRequest(jobsStore.get(existingJobId)) : null;
   const deltas = new Map();
 
-  for (const part of existingJob?.parts || []) {
-    if (!part.partId) continue;
-    deltas.set(part.partId, (deltas.get(part.partId) || 0) - Number(part.quantityUsed || 0));
+  // Inventory delta logic:
+  // - If the existing job WAS already a real (non-quote) job, count its parts as "previously taken" so we restore on edit.
+  // - If the existing job WAS a quote, it never decremented inventory → no need to restore.
+  // - If the new job is a quote, do NOT take parts from inventory (it's just an estimate).
+  const oldCountedAsTaken = existingJob && !existingJob.isQuote;
+  const newCountsAsTaken = !job.isQuote;
+
+  if (oldCountedAsTaken) {
+    for (const part of existingJob?.parts || []) {
+      if (!part.partId) continue;
+      deltas.set(part.partId, (deltas.get(part.partId) || 0) - Number(part.quantityUsed || 0));
+    }
   }
 
-  for (const part of job.parts || []) {
-    if (!part.partId) continue;
-    deltas.set(part.partId, (deltas.get(part.partId) || 0) + Number(part.quantityUsed || 0));
+  if (newCountsAsTaken) {
+    for (const part of job.parts || []) {
+      if (!part.partId) continue;
+      deltas.set(part.partId, (deltas.get(part.partId) || 0) + Number(part.quantityUsed || 0));
+    }
   }
 
   for (const [partId, delta] of deltas.entries()) {
@@ -2050,15 +2186,18 @@ async function saveJobWithInventoryTransaction(job, existingJobId) {
   }
 
   const now = new Date().toISOString();
+  let savedJobId = existingJobId || null;
   if (existingJob) {
     jobsStore.put({ ...existingJob, ...job, id: existingJobId, updatedAt: now });
   } else {
     const newJob = { ...job, createdAt: now, updatedAt: now };
     delete newJob.id;
-    jobsStore.add(newJob);
+    const addReq = jobsStore.add(newJob);
+    addReq.onsuccess = () => { savedJobId = addReq.result; };
   }
 
   await transactionDone(transaction);
+  return savedJobId;
 }
 
 async function savePartFromForm(event) {
@@ -2139,23 +2278,39 @@ async function adjustPartQuantity(partId, delta) {
 async function deleteJob(jobId) {
   const job = state.jobs.find((item) => item.id === jobId);
   if (!job) return;
-  if (!confirm("למחוק את העבודה ולהחזיר את החלקים למלאי?")) return;
+  const isQuote = Boolean(job.isQuote);
+  const msg = isQuote
+    ? "למחוק את הצעת המחיר?"
+    : "למחוק את העבודה ולהחזיר את החלקים למלאי?";
+  if (!confirm(msg)) return;
 
   const transaction = state.db.transaction(["jobs", "inventory"], "readwrite");
   const jobsStore = transaction.objectStore("jobs");
   const inventoryStore = transaction.objectStore("inventory");
 
-  for (const jobPart of job.parts || []) {
-    if (!jobPart.partId) continue;
-    const part = await idbRequest(inventoryStore.get(jobPart.partId));
-    if (!part) continue;
-    part.quantity = Number(part.quantity || 0) + Number(jobPart.quantityUsed || 0);
-    part.updatedAt = new Date().toISOString();
-    inventoryStore.put(part);
+  // Only restore inventory if this was a real (non-quote) job that had taken parts
+  if (!isQuote) {
+    for (const jobPart of job.parts || []) {
+      if (!jobPart.partId) continue;
+      const part = await idbRequest(inventoryStore.get(jobPart.partId));
+      if (!part) continue;
+      part.quantity = Number(part.quantity || 0) + Number(jobPart.quantityUsed || 0);
+      part.updatedAt = new Date().toISOString();
+      inventoryStore.put(part);
+    }
   }
 
   jobsStore.delete(jobId);
   await transactionDone(transaction);
+
+  // Also remove any auto-generated follow-up appointment linked to this job
+  const apptTx = state.db.transaction("appointments", "readwrite");
+  const apptStore = apptTx.objectStore("appointments");
+  const allAppts = await idbRequest(apptStore.getAll());
+  for (const a of allAppts) {
+    if (a.sourceJobId === jobId) apptStore.delete(a.id);
+  }
+  await transactionDone(apptTx);
 
   await refreshData();
   renderAll();
@@ -2316,6 +2471,7 @@ function exportJobsCsv() {
     "נפח מנוע",
     "שם בעל הרכב",
     "טלפון",
+    "ק\"מ",
     "חלקים",
     "מחיר חלקים למוסך",
     "מחיר חלקים ללקוח",
@@ -2325,7 +2481,9 @@ function exportJobsCsv() {
     "מע\"מ",
     "סה\"כ לתשלום",
     "רווח",
-    "תאריך מסירה"
+    "תאריך מסירה",
+    "הערות",
+    "מועד חזרה מומלץ"
   ];
 
   const rows = state.jobs.map((job) => {
@@ -2339,6 +2497,7 @@ function exportJobsCsv() {
       job.engineDisplacement,
       job.ownerName,
       job.phoneNumber || "",
+      job.mileage || "",
       getPartsText(job),
       totals.partsCost,
       totals.partsPrice,
@@ -2348,7 +2507,9 @@ function exportJobsCsv() {
       totals.taxAmount,
       totals.total,
       totals.profit,
-      job.deliveryDate
+      job.deliveryDate,
+      job.notes || "",
+      job.followUpDate || ""
     ];
   });
 
@@ -2439,6 +2600,9 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       updatedAt: appointment.updatedAt || new Date().toISOString()
     };
     if (appointment.arrivedAt) record.arrivedAt = String(appointment.arrivedAt);
+    if (appointment.sourceJobId !== undefined && appointment.sourceJobId !== null) {
+      record.sourceJobId = Number(appointment.sourceJobId);
+    }
     if (appointment.id !== undefined && appointment.id !== null) record.id = appointment.id;
     appointmentsStore.put(record);
   }
@@ -2467,11 +2631,15 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       engineDisplacement: toOptionalInt(job.engineDisplacement),
       ownerName: String(job.ownerName || ""),
       phoneNumber: String(job.phoneNumber || ""),
+      mileage: toOptionalInt(job.mileage),
       laborPrice: toMoney(job.laborPrice),
       deliveryDate: job.deliveryDate || "",
+      notes: String(job.notes || ""),
+      followUpDate: job.followUpDate || "",
       parts: Array.isArray(job.parts) ? job.parts : [],
       taxEnabled: Boolean(job.taxEnabled),
       taxRate: Number(job.taxRate) || 0,
+      isQuote: Boolean(job.isQuote),
       createdAt: job.createdAt || new Date().toISOString(),
       updatedAt: job.updatedAt || new Date().toISOString()
     };
@@ -2620,6 +2788,14 @@ function renderVehicleHistory() {
   const totalSpend = matchingJobs.reduce((s, j) => s + getJobTotals(j).total, 0);
   const totalProfit = matchingJobs.reduce((s, j) => s + getJobTotals(j).profit, 0);
   const lastJob = matchingJobs[0];
+  // Last recorded mileage = most recent job that has a mileage value
+  const lastMileage = matchingJobs.find((j) => j.mileage)?.mileage || null;
+  // Find any future follow-up date in this car's history
+  const today = toIsoDate(new Date());
+  const nextFollowUp = matchingJobs
+    .map((j) => j.followUpDate)
+    .filter((d) => d && d >= today)
+    .sort()[0] || null;
   const owner = (matchingJobs.find((j) => j.ownerName) || matchingAppts.find((a) => a.customerName) || {})?.ownerName
               || (matchingAppts.find((a) => a.customerName) || {})?.customerName || "";
   const phone = (matchingJobs.find((j) => j.phoneNumber) || {})?.phoneNumber
@@ -2661,6 +2837,14 @@ function renderVehicleHistory() {
         <div class="vh-stat-value">${lastJob ? formatDate(lastJob.jobDate) : "—"}</div>
         <div class="vh-stat-label">ביקור אחרון</div>
       </div>
+      <div class="vh-stat">
+        <div class="vh-stat-value">${lastMileage ? lastMileage.toLocaleString("he-IL") : "—"}</div>
+        <div class="vh-stat-label">ק"מ אחרון</div>
+      </div>
+      ${nextFollowUp ? `<div class="vh-stat vh-stat-followup">
+        <div class="vh-stat-value">${formatDate(nextFollowUp)}</div>
+        <div class="vh-stat-label">חזרה מתוכננת</div>
+      </div>` : ""}
     </div>
     ${matchingAppts.length > 0 ? `<div class="vh-appointments-summary">${matchingAppts.length} תורים רשומים</div>` : ""}
   `;
@@ -2673,20 +2857,31 @@ function renderVehicleHistory() {
   els.vehicleHistoryList.innerHTML = "";
   matchingJobs.forEach((job) => {
     const totals = getJobTotals(job);
-    const partsText = getPartsText(job) || "—";
     const isDelivered = Boolean(job.deliveredAt);
-    const statusBadge = isDelivered
+    const isCheckOnly = (!job.parts || job.parts.length === 0) && Number(job.laborPrice || 0) === 0;
+    const statusBadge = isCheckOnly
+      ? '<span class="tax-badge later">בדיקה בלבד</span>'
+      : isDelivered
       ? '<span class="tax-badge included">נמסר</span>'
       : '<span class="tax-badge excluded">פתוח</span>';
+    const partsText = getPartsText(job);
+    const bodyLines = [];
+    if (partsText) bodyLines.push(escapeHtml(partsText));
+    if (Number(job.laborPrice) > 0) bodyLines.push(`עבודה: ${formatCurrency(job.laborPrice)}`);
+    if (job.mileage) bodyLines.push(`ק"מ: ${Number(job.mileage).toLocaleString("he-IL")}`);
+    if (isCheckOnly && bodyLines.length === 0) bodyLines.push("ביקור ללא חיוב");
+
     const card = document.createElement("div");
-    card.className = "vh-visit-card" + (isDelivered ? " is-delivered" : "");
+    card.className = "vh-visit-card" + (isDelivered ? " is-delivered" : "") + (isCheckOnly ? " is-check-only" : "");
     card.innerHTML = `
       <div class="vh-visit-head">
         <div class="vh-visit-date">${formatDate(job.jobDate)}</div>
         ${statusBadge}
         <strong class="vh-visit-total">${formatCurrency(totals.total)}</strong>
       </div>
-      <div class="vh-visit-body">${escapeHtml(partsText)}${Number(job.laborPrice) > 0 ? ` · עבודה: ${formatCurrency(job.laborPrice)}` : ""}</div>
+      <div class="vh-visit-body">${bodyLines.join(" · ")}</div>
+      ${job.notes ? `<div class="vh-visit-notes">📝 ${escapeHtml(job.notes)}</div>` : ""}
+      ${job.followUpDate ? `<div class="vh-visit-followup">📅 חזרה מתוכננת: ${formatDate(job.followUpDate)}</div>` : ""}
       <div class="vh-visit-actions">
         <button class="row-action" type="button" data-vh-open-job="${job.id}">פתח לעריכה</button>
         <button class="row-action" type="button" data-vh-invoice="${job.id}">🧾 חשבונית</button>
@@ -2722,26 +2917,116 @@ function buildInvoiceFilename(job) {
   const number = String(job.id).padStart(6, "0");
   const plate = String(job.vehiclePlate || "").replace(/[^\w֐-׿-]/g, "_");
   const date = job.jobDate || toIsoDate(new Date());
-  // Result e.g. "חשבונית_000123_123-45-678_2026-05-18"
-  return `חשבונית_${number}${plate ? "_" + plate : ""}_${date}`;
+  const prefix = job.isQuote ? "הצעת_מחיר" : "חשבונית";
+  return `${prefix}_${number}${plate ? "_" + plate : ""}_${date}`;
 }
 
 function printInvoiceWithFilename() {
-  const title = els.invoiceSheet.dataset.invoiceTitle || "חשבונית";
-  const original = document.title;
-  document.title = title;
-  window.print();
-  // Restore after the print dialog closes — modern browsers fire afterprint
-  setTimeout(() => { document.title = original; }, 0);
+  // Chromium derives the Save-as-PDF filename from the printing document's <title>.
+  // Mutating document.title on the main window then calling window.print() is racy:
+  // WebView2 reads the title at an unpredictable moment relative to the rAF/microtask
+  // queue, and some Chromium versions strip non-ASCII chars from the suggestion.
+  //
+  // The robust pattern is to print from a same-origin iframe that has its own <title>.
+  // The iframe's document is fully under our control, the print dialog reads its title
+  // synchronously when iframe.contentWindow.print() is invoked, and there is no race
+  // with the main window's title or any other DOM mutation.
+  const rawTitle = els.invoiceSheet.dataset.invoiceTitle || "חשבונית";
+  // Strip HTML-significant chars so the value is safe inside <title>...</title>.
+  const safeTitle = String(rawTitle).replace(/[<>&"]/g, "");
+  const sheetHtml = els.invoiceSheet.innerHTML;
+
+  // If user clicks the print button twice quickly, drop any in-flight iframe first.
+  const previous = document.getElementById("__topgear_print_frame__");
+  if (previous && previous.parentNode) previous.parentNode.removeChild(previous);
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "__topgear_print_frame__";
+  iframe.setAttribute("aria-hidden", "true");
+  // Keep it in-flow but invisible. Tiny on-screen size avoids layout shifts.
+  iframe.style.cssText =
+    "position:fixed;left:0;top:0;width:0;height:0;border:0;opacity:0;pointer-events:none;";
+
+  // srcdoc resolves relative URLs (styles.css) against the parent document, unlike
+  // document.write() which would leave the iframe at about:blank and break the link.
+  iframe.srcdoc = `<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+<meta charset="utf-8">
+<title>${safeTitle}</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  /* The main stylesheet's @media print rule hides every element except
+     #invoiceModal. That rule assumes we are printing from the main document,
+     so inside this isolated iframe (which has no #invoiceModal wrapper)
+     it would hide the entire invoice. Re-show everything explicitly. */
+  @media print {
+    body * { visibility: visible !important; }
+  }
+  html, body { margin: 0; padding: 0; background: #fff; }
+  @page { size: A4; margin: 0; }
+  .inv-page { padding: 18mm 14mm; }
+</style>
+</head>
+<body>${sheetHtml}</body>
+</html>`;
+
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  };
+
+  iframe.addEventListener(
+    "load",
+    () => {
+      try {
+        const win = iframe.contentWindow;
+        // Hook afterprint on the iframe window so we tear down only after the user
+        // has finished interacting with the Save-as-PDF dialog. The 30s safety
+        // timeout below covers the case where afterprint never fires.
+        win.addEventListener("afterprint", cleanup, { once: true });
+        win.focus();
+        win.print();
+      } catch (err) {
+        // Defensive fallback: if the iframe path is blocked by the runtime
+        // (very unlikely in Tauri WebView2), still try the main window with a
+        // title swap so the user is never left without a working print.
+        try {
+          document.title = safeTitle;
+          window.print();
+        } catch (_) {
+          /* swallow — surface nothing useful to the end user */
+        }
+        cleanup();
+      }
+    },
+    { once: true }
+  );
+
+  // Safety net in case the print dialog is dismissed without firing afterprint.
+  setTimeout(cleanup, 30000);
+
+  document.body.appendChild(iframe);
 }
 
 function renderInvoiceHtml(job) {
   const totals = getJobTotals(job);
   const b = state.business;
+  const isQuote = Boolean(job.isQuote);
   const invoiceNumber = String(job.id).padStart(6, "0");
   const issuedAt = formatDate(toIsoDate(new Date()));
   const jobDate = formatDate(job.jobDate);
-  const title = totals.taxEnabled ? "חשבונית מס" : "חשבונית";
+  let title;
+  if (isQuote) {
+    title = "הצעת מחיר";
+  } else {
+    title = totals.taxEnabled ? "חשבונית מס" : "חשבונית";
+  }
+  const numberLabel = isQuote ? "מספר הצעה" : "מספר חשבונית";
+  const dateLabel = isQuote ? "תאריך הצעה" : "תאריך הפקה";
+  const workLabel = isQuote ? "תאריך הביקור" : "תאריך עבודה";
 
   const lineItems = (job.parts || []).map((p, idx) => {
     const lineTotal = Number(p.customerPriceSnapshot || 0) * Number(p.quantityUsed || 0);
@@ -2770,9 +3055,9 @@ function renderInvoiceHtml(job) {
     <div class="inv-page">
       <header class="inv-top">
         <div class="inv-meta">
-          <div class="inv-meta-row"><span>מספר חשבונית</span><strong>${invoiceNumber}</strong></div>
-          <div class="inv-meta-row"><span>תאריך הפקה</span><strong>${issuedAt}</strong></div>
-          <div class="inv-meta-row"><span>תאריך עבודה</span><strong>${jobDate}</strong></div>
+          <div class="inv-meta-row"><span>${numberLabel}</span><strong>${invoiceNumber}</strong></div>
+          <div class="inv-meta-row"><span>${dateLabel}</span><strong>${issuedAt}</strong></div>
+          <div class="inv-meta-row"><span>${workLabel}</span><strong>${jobDate}</strong></div>
         </div>
 
         <div class="inv-title-block">
@@ -2815,8 +3100,12 @@ function renderInvoiceHtml(job) {
 
       <section class="inv-totals-section">
         <div class="inv-notes">
-          <div class="inv-section-label">הערות</div>
-          <div class="inv-notes-line">תודה על העסקים!</div>
+          <div class="inv-section-label">${isQuote ? "תנאים" : "הערות"}</div>
+          ${isQuote
+            ? `<div class="inv-notes-line">הצעה זו תקפה ל-14 יום מתאריך ההפקה.</div>
+               <div class="inv-notes-line inv-notes-small">המחירים אינם מחייבים עד לאישור הלקוח. עם האישור תופק חשבונית מס.</div>`
+            : `<div class="inv-notes-line">תודה על העסקים!</div>`
+          }
           ${totals.taxEnabled ? `<div class="inv-notes-line inv-notes-small">כולל מע"מ בשיעור ${totals.taxRate}%</div>` : '<div class="inv-notes-line inv-notes-small">ללא מע"מ</div>'}
         </div>
 
@@ -2831,7 +3120,7 @@ function renderInvoiceHtml(job) {
         <div class="inv-signatures">
           <div class="inv-signature">
             <div class="inv-signature-line"></div>
-            <div class="inv-signature-label">חתימת הלקוח</div>
+            <div class="inv-signature-label">${isQuote ? "חתימת אישור לקוח" : "חתימת הלקוח"}</div>
           </div>
           <div class="inv-signature">
             <div class="inv-signature-line"></div>

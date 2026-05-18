@@ -1120,6 +1120,49 @@ tr.appointment-arrived td:not(:first-child):not(:last-child) {
   border-color: #16a34a;
 }
 
+.auto-followup-badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 4px;
+  color: #78350f;
+  vertical-align: 1px;
+}
+
+.quote-badge {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #ede9fe;
+  border: 1px solid #7c3aed;
+  border-radius: 4px;
+  color: #5b21b6;
+  letter-spacing: 0.5px;
+}
+
+tr.job-quote {
+  background: #faf5ff;
+}
+
+.quote-toggle {
+  flex-basis: 100%;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  color: #5b21b6;
+}
+
+.quote-toggle input:checked + span {
+  color: #5b21b6;
+  font-weight: 600;
+}
+
 /* Invoice modal — A4 portrait at 96dpi (794px × 1123px) */
 .modal.invoice-modal {
   max-width: 880px;
@@ -1647,9 +1690,18 @@ tr.appointment-arrived td:not(:first-child):not(:last-child) {
 /* Stat strip: 4 flat tiles */
 .vh-stat-strip {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
+}
+
+.vh-stat.vh-stat-followup {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.vh-stat.vh-stat-followup .vh-stat-value {
+  color: var(--accent-strong);
 }
 
 .vh-stat {
@@ -1744,6 +1796,84 @@ tr.appointment-arrived td:not(:first-child):not(:last-child) {
 .vh-visit-actions {
   display: flex;
   gap: 6px;
+}
+
+.vh-visit-card.is-check-only {
+  border-left: 4px solid #d97706;
+}
+
+.vh-visit-notes {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #fffbeb;
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #78350f;
+  line-height: 1.5;
+}
+
+.vh-visit-followup {
+  margin: 8px 0 10px 0;
+  padding: 6px 12px;
+  background: var(--accent-soft);
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
+/* Job notes section in the modal */
+.job-notes-section {
+  margin: 16px 0 8px 0;
+  padding: 14px 16px;
+  background: #fffbeb;
+  border: 1px dashed #fbbf24;
+  border-radius: 8px;
+}
+
+.job-notes-section h3 {
+  margin: 0 0 4px 0;
+  font-size: 14px;
+  color: #78350f;
+}
+
+.job-notes-hint {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.job-notes-grid {
+  display: grid;
+  grid-template-columns: 1fr 180px;
+  gap: 12px;
+}
+
+.job-notes-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.job-notes-grid textarea {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.job-notes-grid input[type="date"] {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
 }
 
 /* WhatsApp view */

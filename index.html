@@ -93,6 +93,7 @@
             </label>
             <div class="range-switch" role="group" aria-label="סינון לפי סטטוס">
               <button class="range-button active" type="button" data-jobs-filter="open">פתוחות</button>
+              <button class="range-button" type="button" data-jobs-filter="quote">הצעות</button>
               <button class="range-button" type="button" data-jobs-filter="delivered">נמסרו</button>
               <button class="range-button" type="button" data-jobs-filter="all">הכל</button>
             </div>
@@ -420,6 +421,10 @@
             <input name="phoneNumber" type="tel" autocomplete="off" inputmode="tel" />
           </label>
           <label>
+            ק"מ ברכב
+            <input name="mileage" type="number" min="0" step="1" inputmode="numeric" placeholder="לדוגמה: 65443" />
+          </label>
+          <label>
             תאריך מסירה
             <input name="deliveryDate" type="date" />
           </label>
@@ -504,6 +509,10 @@
             <input type="number" id="taxRate" name="taxRate" min="0" max="100" step="0.5" value="18" />
             <span aria-hidden="true">%</span>
           </label>
+          <label class="checkbox-line quote-toggle">
+            <input type="checkbox" id="isQuote" name="isQuote" />
+            <span>זוהי הצעת מחיר (לא תיגרע מהמלאי עד אישור)</span>
+          </label>
         </div>
 
         <div class="totals-strip">
@@ -513,6 +522,21 @@
           <span class="tax-line" id="draftTaxLine">מע"מ (<span id="draftTaxRateLabel">18</span>%): <strong id="draftTaxAmount">₪0</strong></span>
           <span>סה"כ לתשלום: <strong id="draftTotal">₪0</strong></span>
           <span>רווח: <strong id="draftProfit">₪0</strong></span>
+        </div>
+
+        <div class="job-notes-section">
+          <h3>הערות ומעקב</h3>
+          <p class="job-notes-hint">למשל: "ביקור בדיקה — בלמים תקינים", "ממליץ על החלפת שמן בעוד 5,000 ק"מ", "אזהרת חיווי במחשב — לחזור לבדיקה". אפשר להזין מועד מומלץ לחזרה (אופציונלי).</p>
+          <div class="job-notes-grid">
+            <label class="notes-textarea-label">
+              סיכום הביקור / הערות
+              <textarea name="notes" rows="3" placeholder="מה נעשה? מה נמצא? מה ההמלצה ללקוח?"></textarea>
+            </label>
+            <label>
+              מועד מומלץ לחזרה
+              <input name="followUpDate" type="date" />
+            </label>
+          </div>
         </div>
 
         <p class="form-error hidden" id="jobError"></p>
