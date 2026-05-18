@@ -1450,6 +1450,12 @@ function renderAnalytics() {
   const totals = state.jobs.reduce(
     (sum, job) => {
       if (!isDateInRange(job.jobDate, start, end)) return sum;
+      // Only realized income/cost/profit counts:
+      //   - quotes are non-binding estimates (no money has changed hands)
+      //   - undelivered jobs are work-in-progress (customer hasn't paid yet)
+      // Both are excluded so the banner reflects actual cash, not promises.
+      if (job.isQuote) return sum;
+      if (!job.deliveredAt) return sum;
       const jobTotals = getJobTotals(job);
       sum.revenue += jobTotals.subtotal;
       sum.cost += jobTotals.partsCost;
@@ -2785,8 +2791,13 @@ function renderVehicleHistory() {
     return;
   }
 
-  const totalSpend = matchingJobs.reduce((s, j) => s + getJobTotals(j).total, 0);
-  const totalProfit = matchingJobs.reduce((s, j) => s + getJobTotals(j).profit, 0);
+  // Money totals only count jobs that have actually been paid for —
+  // exclude quotes (non-binding estimates) and undelivered jobs (open work
+  // where the customer has not paid yet). Visit count below still shows all
+  // jobs so the history list and the count stay consistent.
+  const realizedJobs = matchingJobs.filter((j) => !j.isQuote && j.deliveredAt);
+  const totalSpend = realizedJobs.reduce((s, j) => s + getJobTotals(j).total, 0);
+  const totalProfit = realizedJobs.reduce((s, j) => s + getJobTotals(j).profit, 0);
   const lastJob = matchingJobs[0];
   // Last recorded mileage = most recent job that has a mileage value
   const lastMileage = matchingJobs.find((j) => j.mileage)?.mileage || null;
