@@ -1,7 +1,7 @@
 "use strict";
 
 const DB_NAME = "topgear_offline_garage";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 const PART_CATEGORIES = [
   { id: "all", label: "הכל" },
@@ -16,12 +16,25 @@ const PART_CATEGORIES = [
 ];
 const NEW_CATEGORY_OPTION = "__add_new_category__";
 
+const DEFAULT_BUSINESS = {
+  id: "business",
+  name: "",
+  taxId: "",
+  address: "",
+  phone: "",
+  defaultTaxRate: 18
+};
+
 const state = {
   db: null,
   jobs: [],
   inventory: [],
   customCategories: [],
   appointments: [],
+  business: { ...DEFAULT_BUSINESS },
+  whatsappSource: "job",
+  whatsappSelectedId: null,
+  activeVehiclePlate: "",
   activeView: "jobs",
   activeRange: "today",
   specificRangeDate: "",
@@ -190,6 +203,8 @@ function cacheElements() {
     inventory: document.querySelector("#inventoryView"),
     deliveries: document.querySelector("#deliveriesView"),
     appointments: document.querySelector("#appointmentsView"),
+    whatsapp: document.querySelector("#whatsappView"),
+    vehicleHistory: document.querySelector("#vehicleHistoryView"),
     backup: document.querySelector("#backupView")
   };
 
@@ -277,6 +292,26 @@ function cacheElements() {
   els.exportJobsCsvButton = document.querySelector("#exportJobsCsvButton");
   els.exportInventoryCsvButton = document.querySelector("#exportInventoryCsvButton");
   els.importJsonInput = document.querySelector("#importJsonInput");
+  els.businessSettingsForm = document.querySelector("#businessSettingsForm");
+  els.whatsappSourceTabs = Array.from(document.querySelectorAll("[data-wa-source]"));
+  els.whatsappSourceSearch = document.querySelector("#whatsappSourceSearch");
+  els.whatsappSourceList = document.querySelector("#whatsappSourceList");
+  els.whatsappCustomerName = document.querySelector("#whatsappCustomerName");
+  els.whatsappPhone = document.querySelector("#whatsappPhone");
+  els.whatsappMessage = document.querySelector("#whatsappMessage");
+  els.whatsappTemplates = Array.from(document.querySelectorAll("[data-wa-template]"));
+  els.whatsappSendButton = document.querySelector("#whatsappSendButton");
+  els.whatsappInvoiceButton = document.querySelector("#whatsappInvoiceButton");
+  els.invoiceModal = document.querySelector("#invoiceModal");
+  els.invoiceSheet = document.querySelector("#invoiceSheet");
+  els.invoicePrintButton = document.querySelector("#invoicePrintButton");
+  els.vehicleHistorySearch = document.querySelector("#vehicleHistorySearch");
+  els.vehicleHistoryClearButton = document.querySelector("#vehicleHistoryClearButton");
+  els.vehicleHistorySuggestions = document.querySelector("#vehicleHistorySuggestions");
+  els.vehicleHistoryEmpty = document.querySelector("#vehicleHistoryEmpty");
+  els.vehicleHistoryDetail = document.querySelector("#vehicleHistoryDetail");
+  els.vehicleHistorySummary = document.querySelector("#vehicleHistorySummary");
+  els.vehicleHistoryList = document.querySelector("#vehicleHistoryList");
   els.toast = document.querySelector("#toast");
 }
 
@@ -380,6 +415,53 @@ function bindEvents() {
   els.exportJobsCsvButton.addEventListener("click", exportJobsCsv);
   els.exportInventoryCsvButton.addEventListener("click", exportInventoryCsv);
   els.importJsonInput.addEventListener("change", importJson);
+  els.businessSettingsForm.addEventListener("submit", saveBusinessFromForm);
+  els.invoicePrintButton.addEventListener("click", printInvoiceWithFilename);
+  window.addEventListener("afterprint", () => {
+    if (document.title !== "TopGear - ניהול מוסך") {
+      document.title = "TopGear - ניהול מוסך";
+    }
+  });
+
+  els.whatsappSourceTabs.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.whatsappSource = btn.dataset.waSource;
+      state.whatsappSelectedId = null;
+      els.whatsappSourceTabs.forEach((b) => b.classList.toggle("active", b === btn));
+      renderWhatsappSourceList();
+    });
+  });
+  els.whatsappSourceSearch.addEventListener("input", renderWhatsappSourceList);
+  els.whatsappTemplates.forEach((btn) => {
+    btn.addEventListener("click", () => applyWhatsappTemplate(btn.dataset.waTemplate));
+  });
+  els.whatsappSendButton.addEventListener("click", sendWhatsapp);
+  els.whatsappInvoiceButton.addEventListener("click", downloadInvoiceForWhatsapp);
+
+  els.vehicleHistorySearch.addEventListener("input", () => {
+    const q = els.vehicleHistorySearch.value;
+    const exactMatch = state.jobs.find((j) => normalizePlate(j.vehiclePlate) === normalizePlate(q));
+    if (exactMatch && normalizePlate(q).length >= 3) {
+      state.activeVehiclePlate = q;
+    } else {
+      state.activeVehiclePlate = "";
+    }
+    renderVehicleHistory();
+  });
+  els.vehicleHistoryClearButton.addEventListener("click", () => {
+    els.vehicleHistorySearch.value = "";
+    state.activeVehiclePlate = "";
+    renderVehicleHistory();
+    els.vehicleHistorySearch.focus();
+  });
+
+  document.addEventListener("click", (event) => {
+    const plateBtn = event.target?.closest?.("[data-vehicle-history]");
+    if (plateBtn) {
+      event.stopPropagation();
+      openVehicleHistory(plateBtn.dataset.vehicleHistory);
+    }
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
@@ -447,6 +529,10 @@ function openDatabase() {
         appointments.createIndex("appointmentDate", "appointmentDate", { unique: false });
         appointments.createIndex("phoneNumber", "phoneNumber", { unique: false });
       }
+
+      if (!db.objectStoreNames.contains("settings")) {
+        db.createObjectStore("settings", { keyPath: "id" });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -476,11 +562,12 @@ async function getAll(storeName) {
 }
 
 async function refreshData() {
-  const [jobs, inventory, categories, appointments] = await Promise.all([
+  const [jobs, inventory, categories, appointments, settings] = await Promise.all([
     getAll("jobs"),
     getAll("inventory"),
     getAll("categories"),
-    getAll("appointments")
+    getAll("appointments"),
+    getAll("settings")
   ]);
   state.jobs = jobs.sort((a, b) => `${b.jobDate}${b.id}`.localeCompare(`${a.jobDate}${a.id}`));
   state.inventory = inventory.sort((a, b) => a.name.localeCompare(b.name, "he"));
@@ -490,6 +577,16 @@ async function refreshData() {
     const bKey = `${b.appointmentDate || ""}${b.appointmentTime || ""}`;
     return aKey.localeCompare(bKey);
   });
+  const businessRecord = settings.find((s) => s.id === "business");
+  state.business = businessRecord ? { ...DEFAULT_BUSINESS, ...businessRecord } : { ...DEFAULT_BUSINESS };
+}
+
+async function saveBusinessSettings(updates) {
+  const next = { ...DEFAULT_BUSINESS, ...state.business, ...updates, id: "business" };
+  const transaction = state.db.transaction("settings", "readwrite");
+  transaction.objectStore("settings").put(next);
+  await transactionDone(transaction);
+  state.business = next;
 }
 
 function renderAll() {
@@ -500,6 +597,195 @@ function renderAll() {
   renderDeliveries();
   renderAppointments();
   renderAnalytics();
+  renderBusinessSettings();
+  renderWhatsappSourceList();
+  renderVehicleHistory();
+}
+
+function normalizePlate(plate) {
+  return String(plate || "").replace(/\s+|-/g, "").toLowerCase();
+}
+
+const AVATAR_PALETTE = [
+  "#fde2e4", "#fad2e1", "#e2ece9", "#bee1e6", "#f0efeb",
+  "#dfe7fd", "#cddafd", "#fff1e6", "#fde2cf", "#e0bbe4",
+  "#d8e2dc", "#ffe5d9", "#dbe7e4"
+];
+
+function getAvatarColor(seed) {
+  const s = String(seed || "");
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = ((hash << 5) - hash + s.charCodeAt(i)) | 0;
+  }
+  return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+}
+
+function renderWhatsappSourceList() {
+  if (!els.whatsappSourceList) return;
+  const query = normalizeSearch(els.whatsappSourceSearch.value);
+  let items = [];
+  if (state.whatsappSource === "job") {
+    items = state.jobs
+      .filter((j) => j.phoneNumber)
+      .map((j) => ({
+        id: `job-${j.id}`,
+        title: j.ownerName || "—",
+        sub: `${formatDate(j.jobDate)}${j.deliveredAt ? " · ✓ נמסר" : " · בעבודה"}`,
+        phone: j.phoneNumber,
+        name: j.ownerName || "",
+        plate: j.vehiclePlate || "",
+        jobId: j.id,
+        type: "job"
+      }));
+  } else if (state.whatsappSource === "appointment") {
+    items = state.appointments
+      .filter((a) => a.phoneNumber)
+      .map((a) => ({
+        id: `appt-${a.id}`,
+        title: a.customerName || "—",
+        sub: `${formatDate(a.appointmentDate)}${a.appointmentTime ? " " + a.appointmentTime : ""}${a.arrivedAt ? " · ✓ הגיע" : ""}`,
+        phone: a.phoneNumber,
+        name: a.customerName || "",
+        plate: a.vehiclePlate || "",
+        reason: a.reason || "",
+        appointmentDate: a.appointmentDate,
+        appointmentTime: a.appointmentTime,
+        type: "appointment"
+      }));
+  } else {
+    els.whatsappSourceList.innerHTML = '<div class="empty-inline">במצב ידני: מלא טלפון ושם בצד שמאל</div>';
+    return;
+  }
+
+  if (query) {
+    items = items.filter((it) => normalizeSearch([it.title, it.sub, it.phone, it.plate, it.name].join(" ")).includes(query));
+  }
+
+  if (items.length === 0) {
+    els.whatsappSourceList.innerHTML = '<div class="empty-inline">לא נמצאו רשומות</div>';
+    return;
+  }
+
+  els.whatsappSourceList.innerHTML = items.slice(0, 80).map((it) => {
+    const isSelected = state.whatsappSelectedId === it.id;
+    const initial = String(it.name || it.plate || "?").trim().charAt(0).toUpperCase() || "?";
+    const avatarColor = getAvatarColor(it.name || it.plate || "");
+    return `
+      <div class="wa-row${isSelected ? " is-selected" : ""}" data-wa-pick="${it.id}">
+        <div class="wa-avatar" style="background:${avatarColor}">
+          ${isSelected ? "✓" : escapeHtml(initial)}
+        </div>
+        <div class="wa-row-main">
+          <div class="wa-row-name">${escapeHtml(it.name || "—")}</div>
+          <div class="wa-row-context">${escapeHtml((it.plate || "") + (it.plate ? " · " : "") + (it.sub || ""))}</div>
+        </div>
+        <div class="wa-row-phone" dir="ltr">${escapeHtml(it.phone || "")}</div>
+      </div>
+    `;
+  }).join("");
+
+  els.whatsappSourceList.querySelectorAll("[data-wa-pick]").forEach((row) => {
+    row.addEventListener("click", () => {
+      const pickId = row.dataset.waPick;
+      const item = items.find((x) => x.id === pickId);
+      if (!item) return;
+      state.whatsappSelectedId = pickId;
+      els.whatsappCustomerName.value = item.name || "";
+      els.whatsappPhone.value = item.phone || "";
+      els.whatsappInvoiceButton.disabled = item.type !== "job";
+      els.whatsappInvoiceButton.dataset.jobId = item.type === "job" ? String(item.jobId) : "";
+      els.whatsappMessage.dataset.context = JSON.stringify(item);
+      renderWhatsappSourceList();
+    });
+  });
+}
+
+function applyWhatsappTemplate(kind) {
+  const ctx = (() => { try { return JSON.parse(els.whatsappMessage.dataset.context || "{}"); } catch { return {}; } })();
+  const name = els.whatsappCustomerName.value.trim() || ctx.name || "לקוח";
+  const garageName = state.business.name || "המוסך";
+  const plate = ctx.plate || "";
+  const date = ctx.appointmentDate ? formatDate(ctx.appointmentDate) : "";
+  const time = ctx.appointmentTime || "";
+  const phoneLine = state.business.phone ? `\nליצירת קשר: ${state.business.phone}` : "";
+
+  let msg = "";
+  switch (kind) {
+    case "appointment": {
+      const whenParts = [];
+      if (date) whenParts.push(date);
+      if (time) whenParts.push(`בשעה ${time}`);
+      const whenStr = whenParts.length ? whenParts.join(" ") : "";
+      msg = `שלום ${name},\nתזכורת קצרה לגבי התור שלך ב-${garageName}${whenStr ? ` ביום ${whenStr}` : ""}.${ctx.reason ? `\nמטרת הביקור: ${ctx.reason}` : ""}${plate ? `\nרכב: ${plate}` : ""}\nנתראה!${phoneLine}`;
+      break;
+    }
+    case "ready": {
+      msg = `שלום ${name},\nהרכב${plate ? " " + plate : ""} מוכן לאיסוף ב-${garageName}.\nנשמח לראותך בשעות הפעילות.${phoneLine}`;
+      break;
+    }
+    case "invoice": {
+      msg = `שלום ${name},\nמצורפת חשבונית עבור הטיפול ב-${garageName}${plate ? ` עבור הרכב ${plate}` : ""}.\nתודה על האמון!`;
+      break;
+    }
+    case "general": {
+      msg = `שלום ${name},\nתודה שבחרת ב-${garageName}. נשמח לראותך שוב.${phoneLine}`;
+      break;
+    }
+  }
+  els.whatsappMessage.value = msg;
+}
+
+function formatPhoneForWhatsapp(phone) {
+  const digits = String(phone || "").replace(/\D/g, "");
+  if (!digits) return null;
+  if (digits.startsWith("972")) return digits;
+  if (digits.startsWith("0")) return "972" + digits.slice(1);
+  return digits;
+}
+
+function sendWhatsapp() {
+  const phone = formatPhoneForWhatsapp(els.whatsappPhone.value);
+  const msg = els.whatsappMessage.value.trim();
+  if (!phone) { showToast("מספר טלפון חסר או לא תקין"); return; }
+  if (!msg) { showToast("ההודעה ריקה"); return; }
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
+  window.open(url, "_blank", "noopener");
+}
+
+function downloadInvoiceForWhatsapp() {
+  const jobIdStr = els.whatsappInvoiceButton.dataset.jobId;
+  if (!jobIdStr) return;
+  const jobId = Number(jobIdStr);
+  openInvoiceForJob(jobId);
+  showToast('בחר "🖨 הדפס / שמור PDF" → "Save as PDF" כדי לקבל את הקובץ');
+}
+
+function renderBusinessSettings() {
+  if (!els.businessSettingsForm) return;
+  els.businessSettingsForm.elements.name.value = state.business.name || "";
+  els.businessSettingsForm.elements.taxId.value = state.business.taxId || "";
+  els.businessSettingsForm.elements.address.value = state.business.address || "";
+  els.businessSettingsForm.elements.phone.value = state.business.phone || "";
+  els.businessSettingsForm.elements.defaultTaxRate.value = String(state.business.defaultTaxRate ?? 18);
+}
+
+async function saveBusinessFromForm(event) {
+  event.preventDefault();
+  const f = els.businessSettingsForm;
+  try {
+    await saveBusinessSettings({
+      name: f.elements.name.value.trim(),
+      taxId: f.elements.taxId.value.trim(),
+      address: f.elements.address.value.trim(),
+      phone: f.elements.phone.value.trim(),
+      defaultTaxRate: Number(f.elements.defaultTaxRate.value) || 18
+    });
+    showToast("פרטי העסק נשמרו");
+  } catch (error) {
+    console.error(error);
+    showToast("שגיאה בשמירת פרטי העסק");
+  }
 }
 
 async function createCategory(rawLabel) {
@@ -560,6 +846,8 @@ function switchView(view) {
     inventory: ["ניהול מלאי חלקים", "קטלוג חלקים מקומי עם כמויות ומחירים"],
     deliveries: ["מסירות צפויות", "עבודות לפי תאריך מסירה עם סטטוס ואיחורים"],
     appointments: ["תורים ופגישות", "תיאום הגעות עם פרטי לקוח, רכב וסיבת ההגעה"],
+    whatsapp: ["שליחה ללקוח", "שליחת הודעות WhatsApp ללקוחות מתוך עבודות ותורים"],
+    vehicleHistory: ["היסטוריית רכב", "כל הביקורים של רכב לפי מספר רישוי"],
     backup: ["גיבוי וייצוא", "שמירת נתונים מקומית לקבצי גיבוי ו-CSV"]
   };
 
@@ -601,7 +889,7 @@ function renderJobs() {
     row.innerHTML = `
       <td>${formatDate(job.jobDate)}</td>
       <td>${getHebrewDay(job.jobDate)}</td>
-      <td>${escapeHtml(job.vehiclePlate)}</td>
+      <td><button type="button" class="plate-link" data-vehicle-history="${escapeHtml(job.vehiclePlate)}">${escapeHtml(job.vehiclePlate)}</button></td>
       <td>${escapeHtml(job.vehicleModel || "")}</td>
       <td>${job.vehicleYear || ""}</td>
       <td>${job.engineDisplacement || ""}</td>
@@ -618,6 +906,7 @@ function renderJobs() {
       <td>
         <span class="row-actions">
           ${deliverButton}
+          <button class="row-action" type="button" data-job-invoice="${job.id}">🧾 חשבונית</button>
           <button class="row-action" type="button" data-job-edit="${job.id}">עריכה</button>
           <button class="row-action danger-action" type="button" data-job-delete="${job.id}">מחיקה</button>
         </span>
@@ -643,6 +932,9 @@ function renderJobs() {
   });
   els.jobsBody.querySelectorAll("[data-job-reopen]").forEach((button) => {
     button.addEventListener("click", () => markJobReopened(Number(button.dataset.jobReopen)));
+  });
+  els.jobsBody.querySelectorAll("[data-job-invoice]").forEach((button) => {
+    button.addEventListener("click", () => openInvoiceForJob(Number(button.dataset.jobInvoice)));
   });
 
   els.jobsEmpty.classList.toggle("hidden", rows.length > 0);
@@ -775,7 +1067,7 @@ function renderDeliveries() {
       <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
       <td>${formatDate(job.deliveryDate)}</td>
       <td>${formatDaysUntil(days)}</td>
-      <td>${escapeHtml(job.vehiclePlate)}</td>
+      <td><button type="button" class="plate-link" data-vehicle-history="${escapeHtml(job.vehiclePlate)}">${escapeHtml(job.vehiclePlate)}</button></td>
       <td>${escapeHtml(job.vehicleModel || "")}</td>
       <td>${escapeHtml(job.ownerName || "")}</td>
       <td class="parts-cell" title="${escapeHtml(getPartsText(job))}">${escapeHtml(getPartsText(job))}</td>
@@ -896,7 +1188,7 @@ function renderAppointments() {
       <td>${escapeHtml(appointment.appointmentTime || "")}</td>
       <td>${escapeHtml(appointment.customerName)}</td>
       <td>${phoneHtml}</td>
-      <td>${escapeHtml(appointment.vehiclePlate || "")}</td>
+      <td>${appointment.vehiclePlate ? `<button type="button" class="plate-link" data-vehicle-history="${escapeHtml(appointment.vehiclePlate)}">${escapeHtml(appointment.vehiclePlate)}</button>` : ""}</td>
       <td>${escapeHtml(appointment.vehicleModel || "")}</td>
       <td>${escapeHtml(appointment.reason || "")}</td>
       <td class="notes-cell" title="${escapeHtml(appointment.notes || "")}">${escapeHtml(appointment.notes || "")}</td>
@@ -1310,7 +1602,7 @@ function openJobModal(jobId = null, prefillAppointment = null) {
   els.jobForm.elements.jobDate.value = today;
   els.jobForm.elements.laborPrice.value = "0";
   els.taxEnabled.checked = true;
-  els.taxRate.value = "18";
+  els.taxRate.value = String(state.business?.defaultTaxRate ?? 18);
 
   if (jobId) {
     const job = state.jobs.find((item) => item.id === jobId);
@@ -2003,11 +2295,12 @@ function exportJson() {
   const payload = {
     app: "TopGear",
     exportedAt: new Date().toISOString(),
-    version: 3,
+    version: 4,
     jobs: state.jobs,
     inventory: state.inventory,
     customCategories: state.customCategories,
-    appointments: state.appointments
+    appointments: state.appointments,
+    business: state.business
   };
   downloadFile(`topgear-backup-${toIsoDate(new Date())}.json`, JSON.stringify(payload, null, 2), "application/json");
   showToast("קובץ JSON נשמר");
@@ -2091,7 +2384,8 @@ async function importJson(event) {
       payload.jobs,
       payload.inventory,
       Array.isArray(payload.customCategories) ? payload.customCategories : [],
-      Array.isArray(payload.appointments) ? payload.appointments : []
+      Array.isArray(payload.appointments) ? payload.appointments : [],
+      payload.business || null
     );
     await refreshData();
     renderAll();
@@ -2104,17 +2398,21 @@ async function importJson(event) {
   }
 }
 
-async function replaceAllData(jobs, inventory, customCategories = [], appointments = []) {
-  const transaction = state.db.transaction(["jobs", "inventory", "categories", "appointments"], "readwrite");
+async function replaceAllData(jobs, inventory, customCategories = [], appointments = [], business = null) {
+  const transaction = state.db.transaction(["jobs", "inventory", "categories", "appointments", "settings"], "readwrite");
   const jobsStore = transaction.objectStore("jobs");
   const inventoryStore = transaction.objectStore("inventory");
   const categoriesStore = transaction.objectStore("categories");
   const appointmentsStore = transaction.objectStore("appointments");
+  const settingsStore = transaction.objectStore("settings");
 
   jobsStore.clear();
   inventoryStore.clear();
   categoriesStore.clear();
   appointmentsStore.clear();
+  if (business && typeof business === "object") {
+    settingsStore.put({ ...DEFAULT_BUSINESS, ...business, id: "business" });
+  }
 
   for (const category of customCategories) {
     if (!category?.id || !category?.label) continue;
@@ -2220,6 +2518,336 @@ function closeAllModals() {
   closeModal("jobModal");
   closeModal("partModal");
   closeModal("appointmentModal");
+  closeModal("invoiceModal");
+}
+
+function openVehicleHistory(plate) {
+  state.activeVehiclePlate = String(plate || "").trim();
+  els.vehicleHistorySearch.value = state.activeVehiclePlate;
+  switchView("vehicleHistory");
+  renderVehicleHistory();
+}
+
+function renderVehicleHistory() {
+  if (!els.vehicleHistorySearch) return;
+  const query = els.vehicleHistorySearch.value;
+  const queryKey = normalizePlate(query);
+  const queryNormalized = normalizeSearch(query);
+  const activeKey = normalizePlate(state.activeVehiclePlate);
+
+  // Build a unique list of plates from jobs + appointments
+  const plateMap = new Map();
+  for (const j of state.jobs) {
+    const k = normalizePlate(j.vehiclePlate);
+    if (!k) continue;
+    const e = plateMap.get(k) || { plate: j.vehiclePlate, owner: "", phone: "", model: "", year: "", visits: 0, lastDate: "" };
+    e.visits += 1;
+    if (j.ownerName && !e.owner) e.owner = j.ownerName;
+    if (j.phoneNumber && !e.phone) e.phone = j.phoneNumber;
+    if (j.vehicleModel && !e.model) e.model = j.vehicleModel;
+    if (j.vehicleYear && !e.year) e.year = String(j.vehicleYear);
+    if (j.jobDate > (e.lastDate || "")) e.lastDate = j.jobDate;
+    plateMap.set(k, e);
+  }
+  for (const a of state.appointments) {
+    const k = normalizePlate(a.vehiclePlate);
+    if (!k || plateMap.has(k)) continue;
+    plateMap.set(k, {
+      plate: a.vehiclePlate,
+      owner: a.customerName || "",
+      phone: a.phoneNumber || "",
+      model: a.vehicleModel || "",
+      year: "",
+      visits: 0,
+      lastDate: ""
+    });
+  }
+  const allPlates = Array.from(plateMap.values()).sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
+
+  // Show suggestions: matching the query (or recent if empty)
+  let suggestions;
+  if (queryNormalized) {
+    suggestions = allPlates.filter((p) => {
+      const hay = normalizeSearch([p.plate, p.owner, p.phone, p.model].join(" "));
+      return hay.includes(queryNormalized);
+    });
+  } else {
+    suggestions = allPlates.slice(0, 8);
+  }
+
+  els.vehicleHistorySuggestions.innerHTML = "";
+  if (suggestions.length === 0) {
+    els.vehicleHistorySuggestions.innerHTML = '<div class="empty-inline">לא נמצאו רכבים</div>';
+  } else {
+    suggestions.slice(0, 24).forEach((p) => {
+      const isActive = normalizePlate(p.plate) === activeKey;
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "vh-chip" + (isActive ? " active" : "");
+      chip.innerHTML = `
+        <strong>${escapeHtml(p.plate)}</strong>
+        <span>${escapeHtml(p.owner || "—")}${p.model ? " · " + escapeHtml(p.model) : ""}</span>
+        <small>${p.visits ? `${p.visits} ביקורים` : "תור בלבד"}${p.lastDate ? ` · ${formatDate(p.lastDate)}` : ""}</small>
+      `;
+      chip.addEventListener("click", () => {
+        state.activeVehiclePlate = p.plate;
+        els.vehicleHistorySearch.value = p.plate;
+        renderVehicleHistory();
+      });
+      els.vehicleHistorySuggestions.appendChild(chip);
+    });
+  }
+
+  // Detail panel
+  if (!activeKey) {
+    els.vehicleHistoryDetail.classList.add("hidden");
+    els.vehicleHistoryEmpty.classList.toggle("hidden", queryNormalized.length > 0);
+    return;
+  }
+
+  els.vehicleHistoryEmpty.classList.add("hidden");
+  els.vehicleHistoryDetail.classList.remove("hidden");
+
+  const matchingJobs = state.jobs.filter((j) => normalizePlate(j.vehiclePlate) === activeKey);
+  const matchingAppts = state.appointments.filter((a) => normalizePlate(a.vehiclePlate) === activeKey);
+
+  if (matchingJobs.length === 0 && matchingAppts.length === 0) {
+    els.vehicleHistorySummary.innerHTML = `<div class="empty-inline">לא נמצאו עבודות או תורים עבור ${escapeHtml(state.activeVehiclePlate)}</div>`;
+    els.vehicleHistoryList.innerHTML = "";
+    return;
+  }
+
+  const totalSpend = matchingJobs.reduce((s, j) => s + getJobTotals(j).total, 0);
+  const totalProfit = matchingJobs.reduce((s, j) => s + getJobTotals(j).profit, 0);
+  const lastJob = matchingJobs[0];
+  const owner = (matchingJobs.find((j) => j.ownerName) || matchingAppts.find((a) => a.customerName) || {})?.ownerName
+              || (matchingAppts.find((a) => a.customerName) || {})?.customerName || "";
+  const phone = (matchingJobs.find((j) => j.phoneNumber) || {})?.phoneNumber
+              || (matchingAppts.find((a) => a.phoneNumber) || {})?.phoneNumber || "";
+  const model = (matchingJobs.find((j) => j.vehicleModel) || {})?.vehicleModel
+              || (matchingAppts.find((a) => a.vehicleModel) || {})?.vehicleModel || "";
+  const year = (matchingJobs.find((j) => j.vehicleYear) || {})?.vehicleYear || "";
+  const engineCC = (matchingJobs.find((j) => j.engineDisplacement) || {})?.engineDisplacement || "";
+
+  els.vehicleHistorySummary.innerHTML = `
+    <div class="vh-hero">
+      <div class="il-plate" aria-label="מספר רישוי">
+        <div class="il-plate-il">IL</div>
+        <div class="il-plate-number">${escapeHtml(state.activeVehiclePlate)}</div>
+      </div>
+      <div class="vh-hero-info">
+        <div class="vh-hero-vehicle">${escapeHtml(model || "רכב")}${year ? " · " + year : ""}${engineCC ? ` · ${engineCC} סמ"ק` : ""}</div>
+        <div class="vh-hero-owner">
+          <span class="vh-hero-owner-name">${escapeHtml(owner || "ללא בעלים רשום")}</span>
+          ${phone ? `<a href="tel:${escapeHtml(phone)}" class="vh-hero-phone">📞 ${escapeHtml(phone)}</a>` : ""}
+        </div>
+      </div>
+    </div>
+
+    <div class="vh-stat-strip">
+      <div class="vh-stat">
+        <div class="vh-stat-value">${matchingJobs.length}</div>
+        <div class="vh-stat-label">סה"כ ביקורים</div>
+      </div>
+      <div class="vh-stat">
+        <div class="vh-stat-value">${formatCurrency(totalSpend)}</div>
+        <div class="vh-stat-label">סה"כ הכנסה</div>
+      </div>
+      <div class="vh-stat">
+        <div class="vh-stat-value vh-stat-profit">${formatCurrency(totalProfit)}</div>
+        <div class="vh-stat-label">רווח מצטבר</div>
+      </div>
+      <div class="vh-stat">
+        <div class="vh-stat-value">${lastJob ? formatDate(lastJob.jobDate) : "—"}</div>
+        <div class="vh-stat-label">ביקור אחרון</div>
+      </div>
+    </div>
+    ${matchingAppts.length > 0 ? `<div class="vh-appointments-summary">${matchingAppts.length} תורים רשומים</div>` : ""}
+  `;
+
+  if (matchingJobs.length === 0) {
+    els.vehicleHistoryList.innerHTML = '<div class="empty-inline">אין עבודות (רק תורים) — לחץ "✓ הגיע" במסך תורים כדי לפתוח עבודה חדשה</div>';
+    return;
+  }
+
+  els.vehicleHistoryList.innerHTML = "";
+  matchingJobs.forEach((job) => {
+    const totals = getJobTotals(job);
+    const partsText = getPartsText(job) || "—";
+    const isDelivered = Boolean(job.deliveredAt);
+    const statusBadge = isDelivered
+      ? '<span class="tax-badge included">נמסר</span>'
+      : '<span class="tax-badge excluded">פתוח</span>';
+    const card = document.createElement("div");
+    card.className = "vh-visit-card" + (isDelivered ? " is-delivered" : "");
+    card.innerHTML = `
+      <div class="vh-visit-head">
+        <div class="vh-visit-date">${formatDate(job.jobDate)}</div>
+        ${statusBadge}
+        <strong class="vh-visit-total">${formatCurrency(totals.total)}</strong>
+      </div>
+      <div class="vh-visit-body">${escapeHtml(partsText)}${Number(job.laborPrice) > 0 ? ` · עבודה: ${formatCurrency(job.laborPrice)}` : ""}</div>
+      <div class="vh-visit-actions">
+        <button class="row-action" type="button" data-vh-open-job="${job.id}">פתח לעריכה</button>
+        <button class="row-action" type="button" data-vh-invoice="${job.id}">🧾 חשבונית</button>
+      </div>
+    `;
+    els.vehicleHistoryList.appendChild(card);
+  });
+
+  els.vehicleHistoryList.querySelectorAll("[data-vh-open-job]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = Number(btn.dataset.vhOpenJob);
+      switchView("jobs");
+      openJobModal(id);
+    });
+  });
+  els.vehicleHistoryList.querySelectorAll("[data-vh-invoice]").forEach((btn) => {
+    btn.addEventListener("click", () => openInvoiceForJob(Number(btn.dataset.vhInvoice)));
+  });
+}
+
+function openInvoiceForJob(jobId) {
+  const job = state.jobs.find((item) => item.id === jobId);
+  if (!job) return;
+  if (!state.business.name || !state.business.taxId) {
+    if (!confirm("פרטי העסק לא הוגדרו (שם, מספר עוסק). החשבונית תופק אך לא תעמוד בדרישות חוק. להמשיך?")) return;
+  }
+  els.invoiceSheet.innerHTML = renderInvoiceHtml(job);
+  els.invoiceSheet.dataset.invoiceTitle = buildInvoiceFilename(job);
+  openModal("invoiceModal");
+}
+
+function buildInvoiceFilename(job) {
+  const number = String(job.id).padStart(6, "0");
+  const plate = String(job.vehiclePlate || "").replace(/[^\w֐-׿-]/g, "_");
+  const date = job.jobDate || toIsoDate(new Date());
+  // Result e.g. "חשבונית_000123_123-45-678_2026-05-18"
+  return `חשבונית_${number}${plate ? "_" + plate : ""}_${date}`;
+}
+
+function printInvoiceWithFilename() {
+  const title = els.invoiceSheet.dataset.invoiceTitle || "חשבונית";
+  const original = document.title;
+  document.title = title;
+  window.print();
+  // Restore after the print dialog closes — modern browsers fire afterprint
+  setTimeout(() => { document.title = original; }, 0);
+}
+
+function renderInvoiceHtml(job) {
+  const totals = getJobTotals(job);
+  const b = state.business;
+  const invoiceNumber = String(job.id).padStart(6, "0");
+  const issuedAt = formatDate(toIsoDate(new Date()));
+  const jobDate = formatDate(job.jobDate);
+  const title = totals.taxEnabled ? "חשבונית מס" : "חשבונית";
+
+  const lineItems = (job.parts || []).map((p, idx) => {
+    const lineTotal = Number(p.customerPriceSnapshot || 0) * Number(p.quantityUsed || 0);
+    return `
+      <tr>
+        <td class="col-idx">${idx + 1}</td>
+        <td class="col-desc">${escapeHtml(p.nameSnapshot)}${p.skuSnapshot ? ` <small class="sku">${escapeHtml(p.skuSnapshot)}</small>` : ''}${p.temporary ? ' <small class="temp-mark">(זמני)</small>' : ''}</td>
+        <td class="col-qty">${p.quantityUsed}</td>
+        <td class="col-price">${formatInvoiceCurrency(p.customerPriceSnapshot)}</td>
+        <td class="col-total">${formatInvoiceCurrency(lineTotal)}</td>
+      </tr>
+    `;
+  }).join("");
+
+  const laborRow = Number(job.laborPrice) > 0 ? `
+    <tr>
+      <td class="col-idx">${(job.parts?.length || 0) + 1}</td>
+      <td class="col-desc">עבודה / שירות</td>
+      <td class="col-qty">1</td>
+      <td class="col-price">${formatInvoiceCurrency(job.laborPrice)}</td>
+      <td class="col-total">${formatInvoiceCurrency(job.laborPrice)}</td>
+    </tr>
+  ` : "";
+
+  return `
+    <div class="inv-page">
+      <header class="inv-top">
+        <div class="inv-meta">
+          <div class="inv-meta-row"><span>מספר חשבונית</span><strong>${invoiceNumber}</strong></div>
+          <div class="inv-meta-row"><span>תאריך הפקה</span><strong>${issuedAt}</strong></div>
+          <div class="inv-meta-row"><span>תאריך עבודה</span><strong>${jobDate}</strong></div>
+        </div>
+
+        <div class="inv-title-block">
+          <h1 class="inv-title">${title}</h1>
+          <div class="inv-rule"></div>
+        </div>
+
+        <div class="inv-business">
+          <div class="inv-business-name">${escapeHtml(b.name || "TopGear")}</div>
+          ${b.taxId ? `<div class="inv-business-id">עוסק מורשה: ${escapeHtml(b.taxId)}</div>` : ""}
+          ${b.address ? `<div class="inv-business-line">${escapeHtml(b.address)}</div>` : ""}
+          ${b.phone ? `<div class="inv-business-line">טלפון: ${escapeHtml(b.phone)}</div>` : ""}
+        </div>
+      </header>
+
+      <section class="inv-customer-section">
+        <div class="inv-section-label">לכבוד</div>
+        <div class="inv-customer-name">${escapeHtml(job.ownerName || "—")}</div>
+        ${job.phoneNumber ? `<div class="inv-customer-line">טלפון: ${escapeHtml(job.phoneNumber)}</div>` : ""}
+        <div class="inv-customer-line">
+          רכב: <strong>${escapeHtml(job.vehiclePlate || "")}</strong>${job.vehicleModel ? " · " + escapeHtml(job.vehicleModel) : ""}${job.vehicleYear ? " · שנת ייצור " + job.vehicleYear : ""}${job.engineDisplacement ? ` · ${job.engineDisplacement} סמ"ק` : ""}
+        </div>
+      </section>
+
+      <table class="inv-items">
+        <thead>
+          <tr>
+            <th class="col-idx">#</th>
+            <th class="col-desc">תיאור</th>
+            <th class="col-qty">כמות</th>
+            <th class="col-price">מחיר יחידה</th>
+            <th class="col-total">סה"כ</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${lineItems}
+          ${laborRow}
+        </tbody>
+      </table>
+
+      <section class="inv-totals-section">
+        <div class="inv-notes">
+          <div class="inv-section-label">הערות</div>
+          <div class="inv-notes-line">תודה על העסקים!</div>
+          ${totals.taxEnabled ? `<div class="inv-notes-line inv-notes-small">כולל מע"מ בשיעור ${totals.taxRate}%</div>` : '<div class="inv-notes-line inv-notes-small">ללא מע"מ</div>'}
+        </div>
+
+        <div class="inv-totals">
+          <div class="inv-totals-row"><span>סה"כ לפני מע"מ</span><strong>${formatInvoiceCurrency(totals.subtotal)}</strong></div>
+          ${totals.taxEnabled ? `<div class="inv-totals-row"><span>מע"מ (${totals.taxRate}%)</span><strong>${formatInvoiceCurrency(totals.taxAmount)}</strong></div>` : ""}
+          <div class="inv-totals-row grand"><span>סה"כ לתשלום</span><strong>${formatInvoiceCurrency(totals.total)}</strong></div>
+        </div>
+      </section>
+
+      <footer class="inv-footer">
+        <div class="inv-signatures">
+          <div class="inv-signature">
+            <div class="inv-signature-line"></div>
+            <div class="inv-signature-label">חתימת הלקוח</div>
+          </div>
+          <div class="inv-signature">
+            <div class="inv-signature-line"></div>
+            <div class="inv-signature-label">חתימת בעל העסק / חותמת</div>
+          </div>
+        </div>
+        <div class="inv-footer-fine">המסמך הופק באמצעות TopGear · ${new Date().toLocaleString("he-IL")}</div>
+      </footer>
+    </div>
+  `;
+}
+
+function formatInvoiceCurrency(value) {
+  // Standard Israeli invoice format: "1,234.00 ₪"
+  const n = Number(value) || 0;
+  return n.toLocaleString("he-IL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₪";
 }
 
 function showError(element, message) {

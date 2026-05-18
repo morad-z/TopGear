@@ -34,6 +34,14 @@
             <span aria-hidden="true">◰</span>
             תורים
           </button>
+          <button class="nav-button" type="button" data-view="whatsapp">
+            <span aria-hidden="true">▶</span>
+            שליחה ללקוח
+          </button>
+          <button class="nav-button" type="button" data-view="vehicleHistory">
+            <span aria-hidden="true">⌕</span>
+            היסטוריית רכב
+          </button>
           <button class="nav-button" type="button" data-view="backup">
             <span aria-hidden="true">⇩</span>
             גיבוי וייצוא
@@ -232,6 +240,82 @@
           </div>
         </section>
 
+        <section class="view" id="whatsappView" aria-labelledby="whatsappHeading">
+          <div class="whatsapp-grid">
+            <div class="whatsapp-side">
+              <div class="whatsapp-source">
+                <h3>בחירת נמען</h3>
+                <div class="whatsapp-source-tabs" role="tablist">
+                  <button class="range-button active" type="button" data-wa-source="job">מעבודה</button>
+                  <button class="range-button" type="button" data-wa-source="appointment">מתור</button>
+                  <button class="range-button" type="button" data-wa-source="manual">ידני</button>
+                </div>
+                <input id="whatsappSourceSearch" type="search" placeholder="חיפוש לפי מספר רכב, שם או טלפון" />
+                <div class="whatsapp-source-list" id="whatsappSourceList"></div>
+              </div>
+            </div>
+
+            <div class="whatsapp-main">
+              <h3>הודעה</h3>
+              <div class="whatsapp-recipient">
+                <label>
+                  שם הלקוח
+                  <input id="whatsappCustomerName" type="text" autocomplete="off" />
+                </label>
+                <label>
+                  טלפון
+                  <input id="whatsappPhone" type="tel" autocomplete="off" inputmode="tel" placeholder="05X-XXXXXXX" />
+                </label>
+              </div>
+
+              <div class="whatsapp-templates">
+                <span class="templates-label">תבניות מוכנות:</span>
+                <button class="secondary-button compact" type="button" data-wa-template="appointment">תזכורת תור</button>
+                <button class="secondary-button compact" type="button" data-wa-template="ready">רכב מוכן לאיסוף</button>
+                <button class="secondary-button compact" type="button" data-wa-template="invoice">חשבונית מצורפת</button>
+                <button class="secondary-button compact" type="button" data-wa-template="general">תודה כללית</button>
+              </div>
+
+              <label class="whatsapp-message-label">
+                טקסט ההודעה (ניתן לערוך לפני שליחה)
+                <textarea id="whatsappMessage" rows="8" placeholder="כתוב את ההודעה כאן..."></textarea>
+              </label>
+
+              <div class="whatsapp-actions">
+                <button class="secondary-button" type="button" id="whatsappInvoiceButton" disabled>📎 הורד חשבונית (PDF)</button>
+                <button class="primary-button" type="button" id="whatsappSendButton">▶ פתח ב-WhatsApp</button>
+              </div>
+
+              <p class="whatsapp-hint">
+                💡 ה-PDF יורד למחשב — צרף אותו ידנית בחלון WhatsApp שייפתח
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section class="view" id="vehicleHistoryView" aria-labelledby="vehicleHistoryHeading">
+          <div class="vh-toolbar">
+            <label class="search-box vh-search">
+              <span>חיפוש לפי מספר רכב</span>
+              <input id="vehicleHistorySearch" type="search" placeholder="הקלד מספר רכב, שם בעלים או טלפון" autocomplete="off" />
+            </label>
+            <button class="secondary-button" type="button" id="vehicleHistoryClearButton">נקה</button>
+          </div>
+
+          <div class="vh-content">
+            <div class="vh-suggestions" id="vehicleHistorySuggestions"></div>
+            <div class="vh-empty hidden" id="vehicleHistoryEmpty">
+              <h3>היסטוריית רכב</h3>
+              <p>הקלד מספר רכב בתיבת החיפוש למעלה כדי לראות את כל הביקורים, החלקים והעלויות לאותו רכב.</p>
+            </div>
+            <div class="vh-detail hidden" id="vehicleHistoryDetail">
+              <div class="vh-summary-card" id="vehicleHistorySummary"></div>
+              <h3 class="vh-list-title">היסטוריית ביקורים</h3>
+              <div class="vh-visit-list" id="vehicleHistoryList"></div>
+            </div>
+          </div>
+        </section>
+
         <section class="view" id="backupView" aria-labelledby="backupHeading">
           <div class="backup-grid">
             <section class="backup-panel">
@@ -251,6 +335,36 @@
                 <span>בחירת קובץ JSON</span>
                 <input type="file" id="importJsonInput" accept="application/json,.json" />
               </label>
+            </section>
+
+            <section class="backup-panel business-settings">
+              <h2>פרטי העסק (לחשבוניות)</h2>
+              <p>פרטים אלה יופיעו בכל חשבונית מודפסת. חובה לפי חוק בחשבוניות מס.</p>
+              <form id="businessSettingsForm" class="business-grid">
+                <label>
+                  שם העסק
+                  <input name="name" type="text" autocomplete="off" placeholder="לדוגמה: מוסך TopGear" />
+                </label>
+                <label>
+                  מספר עוסק (ע.מ. / ח.פ.)
+                  <input name="taxId" type="text" autocomplete="off" placeholder="9 ספרות" />
+                </label>
+                <label>
+                  כתובת
+                  <input name="address" type="text" autocomplete="off" placeholder="רחוב, מספר, עיר" />
+                </label>
+                <label>
+                  טלפון
+                  <input name="phone" type="tel" autocomplete="off" />
+                </label>
+                <label>
+                  אחוז מע"מ ברירת מחדל
+                  <input name="defaultTaxRate" type="number" min="0" max="100" step="0.5" value="18" />
+                </label>
+                <div class="business-actions">
+                  <button class="primary-button" type="submit">שמור פרטי עסק</button>
+                </div>
+              </form>
             </section>
 
             <section class="backup-panel warning">
@@ -502,6 +616,19 @@
           <button class="primary-button" type="submit">שמירה</button>
         </div>
       </form>
+    </div>
+
+<div class="modal-backdrop hidden" id="invoiceModal" role="dialog" aria-modal="true" aria-labelledby="invoiceModalTitle">
+      <div class="modal invoice-modal">
+        <div class="modal-header no-print">
+          <h2 id="invoiceModalTitle">חשבונית מס</h2>
+          <span class="invoice-actions">
+            <button class="primary-button" type="button" id="invoicePrintButton">🖨 הדפס / שמור PDF</button>
+            <button class="icon-button" type="button" data-close-modal="invoiceModal" aria-label="סגירה">×</button>
+          </span>
+        </div>
+        <div class="invoice-sheet" id="invoiceSheet"></div>
+      </div>
     </div>
 
     <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>

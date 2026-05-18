@@ -47,14 +47,15 @@ TopGear/
 ## Data model (IndexedDB)
 
 **Database name**: `topgear_offline_garage`
-**Current version**: `3` (defined in `app.js:DB_VERSION`)
+**Current version**: `4` (defined in `app.js:DB_VERSION`)
 
 | Store | Key | Indexes | Fields |
 |---|---|---|---|
-| `jobs` | auto-id | `jobDate`, `vehiclePlate` | jobDate, vehiclePlate, vehicleModel, vehicleYear, engineDisplacement, ownerName, laborPrice, deliveryDate, parts[], **taxEnabled**, **taxRate**, **deliveredAt** (ISO string or absent), createdAt, updatedAt |
+| `jobs` | auto-id | `jobDate`, `vehiclePlate` | jobDate, vehiclePlate, vehicleModel, vehicleYear, engineDisplacement, ownerName, **phoneNumber**, laborPrice, deliveryDate, parts[], **taxEnabled**, **taxRate**, **deliveredAt** (ISO string or absent), createdAt, updatedAt |
 | `inventory` | auto-id | `sku` (unique), `name` | sku, name, category, quantity, garageCost, customerPrice, createdAt, updatedAt |
 | `categories` | string id | — | id (`custom_<rand>`), label, custom: true, createdAt |
-| `appointments` | auto-id | `appointmentDate`, `phoneNumber` | appointmentDate, appointmentTime, customerName, phoneNumber, vehiclePlate, vehicleModel, reason, notes |
+| `appointments` | auto-id | `appointmentDate`, `phoneNumber` | appointmentDate, appointmentTime, customerName, phoneNumber, vehiclePlate, vehicleModel, reason, notes, **arrivedAt** (ISO string or absent) |
+| `settings` | string id | — | Single record with `id: "business"`: name, taxId, address, phone, defaultTaxRate |
 
 **Each `parts[]` entry in a job is a snapshot** — it copies `garageCostSnapshot` and `customerPriceSnapshot` at the time the job was saved, so changing inventory prices later doesn't retroactively change historical jobs. **Never change this** — it's an accounting requirement.
 
@@ -277,5 +278,10 @@ The user HAS confirmed wanting:
 - Release notes in update dialog ✅ (v0.1.4)
 - Customer-facing CHANGELOG ✅ (v0.1.4)
 - Mark job as delivered (removes from יומן עבודה default view + מסירות צפויות) ✅ (v0.1.5)
+- Specific-month picker on analytics band ✅ (v0.1.6)
+- Israeli tax invoice (חשבונית מס) printable via browser print → PDF ✅ (v0.1.6)
+- Business settings store (`settings` IDB store, single record `id: "business"`) ✅ (v0.1.6)
+- Per-vehicle service history modal (clickable plates across all views) ✅ (v0.1.6)
+- WhatsApp click-to-send page with 4 templates and source-picking from jobs/appointments ✅ (v0.1.6)
 
 Before suggesting a new feature, check if it's on the declined list. If so, ask the user first.
