@@ -2987,6 +2987,13 @@ function printInvoiceWithFilename() {
         // has finished interacting with the Save-as-PDF dialog. The 30s safety
         // timeout below covers the case where afterprint never fires.
         win.addEventListener("afterprint", cleanup, { once: true });
+        // WebView2/Tauri (and some Chromium builds) derive the Save-as-PDF
+        // filename from the TOP-LEVEL window's document.title even when print
+        // is invoked from a child frame. So we set the main window's title
+        // synchronously right before calling print(). The window-level
+        // afterprint listener registered at boot time will restore the
+        // original "TopGear - ניהול מוסך" title once the dialog closes.
+        document.title = safeTitle;
         win.focus();
         win.print();
       } catch (err) {
