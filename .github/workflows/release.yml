@@ -76,6 +76,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "TopGear ${{ github.ref_name }}"
           releaseBody: ${{ steps.changelog.outputs.notes }}
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
