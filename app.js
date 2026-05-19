@@ -1300,12 +1300,25 @@ function renderAppointments() {
   els.appointmentsBody.innerHTML = "";
   filtered.forEach((appointment) => {
     const arrived = Boolean(appointment.arrivedAt);
+    const noShow = Boolean(appointment.noShowAt) && !arrived;
     const days = getDaysUntil(appointment.appointmentDate);
-    const statusClass = arrived ? "arrived" : getAppointmentStatusClass(days);
-    const statusLabel = arrived ? "הגיע" : getAppointmentStatusLabel(days);
+    // Status precedence: arrived > no-show > pending-by-date. If both
+    // arrivedAt and noShowAt exist for some reason, arrived wins because
+    // the customer ultimately showed up.
+    const statusClass = arrived
+      ? "arrived"
+      : noShow
+      ? "noshow"
+      : getAppointmentStatusClass(days);
+    const statusLabel = arrived
+      ? "הגיע"
+      : noShow
+      ? "לא הגיע"
+      : getAppointmentStatusLabel(days);
     const row = document.createElement("tr");
     row.classList.add(`appointment-${statusClass}`);
     if (arrived) row.classList.add("appointment-arrived");
+    if (noShow) row.classList.add("appointment-noshow");
 
     const phoneHtml = appointment.phoneNumber
       ? `<a href="tel:${escapeHtml(appointment.phoneNumber)}" class="phone-link">${escapeHtml(appointment.phoneNumber)}</a>`
@@ -1315,9 +1328,17 @@ function renderAppointments() {
       ? ' <small class="auto-followup-badge" title="נוצר אוטומטית מתאריך חזרה של עבודה">🔁 מעקב</small>'
       : '';
 
+    // Three primary-action modes:
+    //   - arrived    → undo arrival (rename old "↩ סמן כלא הגיע" to "↩ בטל הגעה"
+    //                  to disambiguate from the real no-show action below)
+    //   - noShow     → restore to pending
+    //   - pending    → either mark arrived (opens job form) OR mark as no-show
     const arriveButtonHtml = arrived
-      ? `<button class="row-action" type="button" data-appointment-revert="${appointment.id}">↩ סמן כלא הגיע</button>`
-      : `<button class="row-action success-action" type="button" data-appointment-arrive="${appointment.id}">✓ הגיע - פתח עבודה</button>`;
+      ? `<button class="row-action" type="button" data-appointment-revert="${appointment.id}">↩ בטל הגעה</button>`
+      : noShow
+      ? `<button class="row-action" type="button" data-appointment-restore="${appointment.id}">↩ החזר לצפוי</button>`
+      : `<button class="row-action success-action" type="button" data-appointment-arrive="${appointment.id}">✓ הגיע - פתח עבודה</button>
+         <button class="row-action danger-action" type="button" data-appointment-noshow="${appointment.id}">✗ לא הגיע</button>`;
 
     row.innerHTML = `
       <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
@@ -1360,15 +1381,26 @@ function renderAppointments() {
   els.appointmentsBody.querySelectorAll("[data-appointment-revert]").forEach((button) => {
     button.addEventListener("click", () => revertAppointmentArrival(Number(button.dataset.appointmentRevert)));
   });
+  els.appointmentsBody.querySelectorAll("[data-appointment-noshow]").forEach((button) => {
+    button.addEventListener("click", () => markAppointmentNoShow(Number(button.dataset.appointmentNoshow)));
+  });
+  els.appointmentsBody.querySelectorAll("[data-appointment-restore]").forEach((button) => {
+    button.addEventListener("click", () => restoreAppointmentFromNoShow(Number(button.dataset.appointmentRestore)));
+  });
 
   els.appointmentsEmpty.classList.toggle("hidden", filtered.length > 0);
 }
 
 function isAppointmentInRange(appointment, range) {
   const arrived = Boolean(appointment.arrivedAt);
+  const noShow = Boolean(appointment.noShowAt) && !arrived;
   if (range === "arrived") return arrived;
+  if (range === "noshow") return noShow;
   if (range === "all") return true;
-  if (arrived) return false;
+  // For the time-based filters (upcoming/today/tomorrow/week) we hide both
+  // arrived AND no-show appointments — those are resolved states and would
+  // clutter the "what's coming up" view.
+  if (arrived || noShow) return false;
   const days = getDaysUntil(appointment.appointmentDate);
   if (days === null) return false;
   switch (range) {
@@ -1514,7 +1546,39 @@ async function revertAppointmentArrival(appointmentId) {
   await transactionDone(transaction);
   await refreshData();
   renderAppointments();
-  showToast(`התור של ${existing.customerName} סומן כלא הגיע`);
+  showToast(`ההגעה של ${existing.customerName} בוטלה — חזר לסטטוס "צפוי"`);
+}
+
+async function markAppointmentNoShow(appointmentId) {
+  const transaction = state.db.transaction("appointments", "readwrite");
+  const store = transaction.objectStore("appointments");
+  const existing = await idbRequest(store.get(appointmentId));
+  if (!existing) return;
+  if (!confirm(`לסמן את התור של ${existing.customerName} כ"לא הגיע"? התור יעבור לטאב "לא הגיעו" וניתן להחזיר אותו לצפוי בכל עת.`)) return;
+  // Defensive: if the appointment was previously marked as arrived,
+  // clear that flag so we don't end up with both arrivedAt and noShowAt.
+  delete existing.arrivedAt;
+  existing.noShowAt = new Date().toISOString();
+  existing.updatedAt = existing.noShowAt;
+  store.put(existing);
+  await transactionDone(transaction);
+  await refreshData();
+  renderAppointments();
+  showToast(`התור של ${existing.customerName} סומן כ"לא הגיע"`);
+}
+
+async function restoreAppointmentFromNoShow(appointmentId) {
+  const transaction = state.db.transaction("appointments", "readwrite");
+  const store = transaction.objectStore("appointments");
+  const existing = await idbRequest(store.get(appointmentId));
+  if (!existing) return;
+  delete existing.noShowAt;
+  existing.updatedAt = new Date().toISOString();
+  store.put(existing);
+  await transactionDone(transaction);
+  await refreshData();
+  renderAppointments();
+  showToast(`התור של ${existing.customerName} הוחזר לסטטוס "צפוי"`);
 }
 
 function renderAnalytics() {
@@ -2104,9 +2168,12 @@ async function syncFollowUpAppointment(jobId, job) {
   };
 
   if (existing) {
-    // Preserve arrivedAt if user already marked it (don't undo their action)
+    // Preserve user-set resolution flags (arrivedAt / noShowAt) when the
+    // source job syncs in updates. Otherwise re-saving the job would
+    // silently undo the garage owner's manual classification.
     const preserved = { ...existing, ...apptData, id: existing.id };
     if (existing.arrivedAt) preserved.arrivedAt = existing.arrivedAt;
+    if (existing.noShowAt) preserved.noShowAt = existing.noShowAt;
     store.put(preserved);
   } else {
     store.add({ ...apptData, createdAt: now });
@@ -2690,6 +2757,7 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       updatedAt: appointment.updatedAt || new Date().toISOString()
     };
     if (appointment.arrivedAt) record.arrivedAt = String(appointment.arrivedAt);
+    if (appointment.noShowAt) record.noShowAt = String(appointment.noShowAt);
     if (appointment.sourceJobId !== undefined && appointment.sourceJobId !== null) {
       record.sourceJobId = Number(appointment.sourceJobId);
     }

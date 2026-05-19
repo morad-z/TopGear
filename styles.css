@@ -1120,6 +1120,25 @@ tr.appointment-arrived td:not(:first-child):not(:last-child) {
   border-color: #16a34a;
 }
 
+/* No-show state: muted red — clearly "resolved as missed" without
+   screaming. Pairs with the .appointment-noshow row dim so the whole
+   row reads as archived. */
+.delivery-badge.noshow {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: #dc2626;
+}
+
+tr.appointment-noshow {
+  color: #9ca3af;
+  background: #fafafa;
+}
+
+tr.appointment-noshow td:not(:first-child):not(:last-child) {
+  text-decoration: line-through;
+  text-decoration-color: rgba(0, 0, 0, 0.18);
+}
+
 .auto-followup-badge {
   display: inline-block;
   margin-inline-start: 6px;
