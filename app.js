@@ -20,6 +20,7 @@ const DEFAULT_BUSINESS = {
   id: "business",
   name: "",
   taxId: "",
+  licenseNumber: "",
   address: "",
   phone: "",
   defaultTaxRate: 18
@@ -792,6 +793,7 @@ function renderBusinessSettings() {
   if (!els.businessSettingsForm) return;
   els.businessSettingsForm.elements.name.value = state.business.name || "";
   els.businessSettingsForm.elements.taxId.value = state.business.taxId || "";
+  els.businessSettingsForm.elements.licenseNumber.value = state.business.licenseNumber || "";
   els.businessSettingsForm.elements.address.value = state.business.address || "";
   els.businessSettingsForm.elements.phone.value = state.business.phone || "";
   els.businessSettingsForm.elements.defaultTaxRate.value = String(state.business.defaultTaxRate ?? 18);
@@ -804,6 +806,7 @@ async function saveBusinessFromForm(event) {
     await saveBusinessSettings({
       name: f.elements.name.value.trim(),
       taxId: f.elements.taxId.value.trim(),
+      licenseNumber: f.elements.licenseNumber.value.trim(),
       address: f.elements.address.value.trim(),
       phone: f.elements.phone.value.trim(),
       defaultTaxRate: Number(f.elements.defaultTaxRate.value) || 18
@@ -888,10 +891,20 @@ function renderJobs() {
   const rows = state.jobs.filter((job) => {
     const isDelivered = Boolean(job.deliveredAt);
     const isQuote = Boolean(job.isQuote);
-    if (filter === "quote" && !isQuote) return false;
-    if (filter !== "quote" && filter !== "all" && isQuote) return false;
-    if (filter === "open" && isDelivered) return false;
-    if (filter === "delivered" && !isDelivered) return false;
+    const isRejected = Boolean(job.rejectedAt);
+    // Rejected quotes have their own dedicated tab. They should NOT bleed
+    // into "open", "quote" (active proposals), "delivered", or any future
+    // filter — only the explicit "rejected" tab and the catch-all "all"
+    // tab should ever show them.
+    if (filter === "rejected") {
+      if (!isRejected) return false;
+    } else {
+      if (isRejected && filter !== "all") return false;
+      if (filter === "quote" && !isQuote) return false;
+      if (filter !== "quote" && filter !== "all" && isQuote) return false;
+      if (filter === "open" && isDelivered) return false;
+      if (filter === "delivered" && !isDelivered) return false;
+    }
     const haystack = normalizeSearch([
       job.vehiclePlate,
       job.vehicleModel,
@@ -907,21 +920,41 @@ function renderJobs() {
     const totals = getJobTotals(job);
     const isDelivered = Boolean(job.deliveredAt);
     const isQuote = Boolean(job.isQuote);
+    const isRejected = Boolean(job.rejectedAt);
     const row = document.createElement("tr");
     row.tabIndex = 0;
     row.dataset.rowIndex = String(index);
     row.classList.toggle("selected", index === state.selectedJobRow);
     row.classList.toggle("job-delivered", isDelivered);
-    row.classList.toggle("job-quote", isQuote);
+    row.classList.toggle("job-quote", isQuote && !isRejected);
+    row.classList.toggle("job-rejected", isRejected);
 
-    const deliverButton = isQuote
-      ? `<button class="row-action success-action" type="button" data-job-approve="${job.id}">✓ אשר וצור עבודה</button>`
+    // Primary action depends on state:
+    //   - rejected quote: offer un-reject so user can recover an estimate
+    //     they dismissed by mistake
+    //   - active quote: approve (becomes job) OR reject (moves to נדחו tab)
+    //   - delivered job: re-open
+    //   - open job: mark delivered
+    const primaryAction = isRejected
+      ? `<button class="row-action" type="button" data-job-unreject="${job.id}">↩ החזר להצעה</button>`
+      : isQuote
+      ? `<button class="row-action success-action" type="button" data-job-approve="${job.id}">✓ אשר וצור עבודה</button>
+         <button class="row-action danger-action" type="button" data-job-reject="${job.id}">✗ דחה</button>`
       : isDelivered
       ? `<button class="row-action" type="button" data-job-reopen="${job.id}">↩ החזר לפתוח</button>`
       : `<button class="row-action success-action" type="button" data-job-deliver="${job.id}">✓ סמן כנמסר</button>`;
 
+    // Reuse the legacy "deliverButton" name in the row template below.
+    const deliverButton = primaryAction;
+
+    const dateBadge = isRejected
+      ? ' <span class="quote-badge quote-rejected-badge">נדחתה</span>'
+      : isQuote
+      ? ' <span class="quote-badge">הצעה</span>'
+      : '';
+
     row.innerHTML = `
-      <td>${formatDate(job.jobDate)}${isQuote ? ' <span class="quote-badge">הצעה</span>' : ''}</td>
+      <td>${formatDate(job.jobDate)}${dateBadge}</td>
       <td>${getHebrewDay(job.jobDate)}</td>
       <td><button type="button" class="plate-link" data-vehicle-history="${escapeHtml(job.vehiclePlate)}">${escapeHtml(job.vehiclePlate)}</button></td>
       <td>${escapeHtml(job.vehicleModel || "")}</td>
@@ -973,6 +1006,12 @@ function renderJobs() {
   els.jobsBody.querySelectorAll("[data-job-approve]").forEach((button) => {
     button.addEventListener("click", () => approveQuote(Number(button.dataset.jobApprove)));
   });
+  els.jobsBody.querySelectorAll("[data-job-reject]").forEach((button) => {
+    button.addEventListener("click", () => rejectQuote(Number(button.dataset.jobReject)));
+  });
+  els.jobsBody.querySelectorAll("[data-job-unreject]").forEach((button) => {
+    button.addEventListener("click", () => unrejectQuote(Number(button.dataset.jobUnreject)));
+  });
 
   els.jobsEmpty.classList.toggle("hidden", rows.length > 0);
 }
@@ -1004,7 +1043,10 @@ async function approveQuote(jobId) {
     return;
   }
 
+  // Drop the rejection marker if it was ever set — an approved quote is by
+  // definition not rejected. Leaving it would corrupt analytics filters.
   const updated = { ...quote, isQuote: false };
+  delete updated.rejectedAt;
   try {
     await saveJobWithInventoryTransaction(updated, jobId);
     await syncFollowUpAppointment(jobId, updated);
@@ -1015,6 +1057,35 @@ async function approveQuote(jobId) {
     console.error(error);
     showToast(error.message || "שגיאה באישור ההצעה");
   }
+}
+
+async function rejectQuote(jobId) {
+  const transaction = state.db.transaction("jobs", "readwrite");
+  const store = transaction.objectStore("jobs");
+  const job = await idbRequest(store.get(jobId));
+  if (!job || !job.isQuote) return;
+  if (!confirm(`לסמן את הצעת המחיר עבור ${job.vehiclePlate || job.ownerName} כ"נדחתה"? ההצעה תועבר לטאב "נדחו" — אפשר להחזיר אותה מאוחר יותר.`)) return;
+  job.rejectedAt = new Date().toISOString();
+  job.updatedAt = job.rejectedAt;
+  store.put(job);
+  await transactionDone(transaction);
+  await refreshData();
+  renderJobs();
+  showToast(`הצעת המחיר עבור ${job.vehiclePlate || job.ownerName} סומנה כנדחתה`);
+}
+
+async function unrejectQuote(jobId) {
+  const transaction = state.db.transaction("jobs", "readwrite");
+  const store = transaction.objectStore("jobs");
+  const job = await idbRequest(store.get(jobId));
+  if (!job || !job.rejectedAt) return;
+  delete job.rejectedAt;
+  job.updatedAt = new Date().toISOString();
+  store.put(job);
+  await transactionDone(transaction);
+  await refreshData();
+  renderJobs();
+  showToast(`הצעת המחיר עבור ${job.vehiclePlate || job.ownerName} הוחזרה לטאב "הצעות"`);
 }
 
 async function markJobReopened(jobId) {
@@ -2500,7 +2571,8 @@ function exportJobsCsv() {
     // so anyone analysing the CSV in Excel can filter "נמסר" rows to match
     // the realised-revenue totals shown in the app.
     let status;
-    if (job.isQuote) status = "הצעת מחיר";
+    if (job.rejectedAt) status = "הצעה נדחתה";
+    else if (job.isQuote) status = "הצעת מחיר";
     else if (job.deliveredAt) status = "נמסר";
     else status = "פתוח";
     return [
@@ -2661,6 +2733,7 @@ async function replaceAllData(jobs, inventory, customCategories = [], appointmen
       updatedAt: job.updatedAt || new Date().toISOString()
     };
     if (job.deliveredAt) record.deliveredAt = String(job.deliveredAt);
+    if (job.rejectedAt) record.rejectedAt = String(job.rejectedAt);
     if (job.id !== undefined && job.id !== null) record.id = job.id;
     jobsStore.put(record);
   }
@@ -3111,6 +3184,7 @@ function renderInvoiceHtml(job) {
         <div class="inv-business">
           <div class="inv-business-name">${escapeHtml(b.name || "TopGear")}</div>
           ${b.taxId ? `<div class="inv-business-id">עוסק מורשה: ${escapeHtml(b.taxId)}</div>` : ""}
+          ${b.licenseNumber ? `<div class="inv-business-id">מספר רישוי: ${escapeHtml(b.licenseNumber)}</div>` : ""}
           ${b.address ? `<div class="inv-business-line">${escapeHtml(b.address)}</div>` : ""}
           ${b.phone ? `<div class="inv-business-line">טלפון: ${escapeHtml(b.phone)}</div>` : ""}
         </div>

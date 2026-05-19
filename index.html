@@ -94,6 +94,7 @@
             <div class="range-switch" role="group" aria-label="סינון לפי סטטוס">
               <button class="range-button active" type="button" data-jobs-filter="open">פתוחות</button>
               <button class="range-button" type="button" data-jobs-filter="quote">הצעות</button>
+              <button class="range-button" type="button" data-jobs-filter="rejected">נדחו</button>
               <button class="range-button" type="button" data-jobs-filter="delivered">נמסרו</button>
               <button class="range-button" type="button" data-jobs-filter="all">הכל</button>
             </div>
@@ -349,6 +350,10 @@
                 <label>
                   מספר עוסק (ע.מ. / ח.פ.)
                   <input name="taxId" type="text" autocomplete="off" placeholder="9 ספרות" />
+                </label>
+                <label>
+                  מספר רישוי עסק
+                  <input name="licenseNumber" type="text" autocomplete="off" placeholder="מספר רישיון עסק / רישוי מוסך" />
                 </label>
                 <label>
                   כתובת

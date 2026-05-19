@@ -1150,6 +1150,28 @@ tr.job-quote {
   background: #faf5ff;
 }
 
+/* Rejected quotes live in their own tab. Make them visually obvious in the
+   shared "all" view so a garage owner skimming the journal can tell at a
+   glance that the row is archived — muted background, dimmer text, and a
+   strikethrough on the description column. */
+tr.job-rejected {
+  background: #fafafa;
+  color: #9ca3af;
+}
+tr.job-rejected td.parts-cell {
+  text-decoration: line-through;
+  text-decoration-color: #d1d5db;
+}
+tr.job-rejected .plate-link {
+  opacity: 0.7;
+}
+
+.quote-badge.quote-rejected-badge {
+  background: #fee2e2;
+  border-color: #dc2626;
+  color: #991b1b;
+}
+
 .quote-toggle {
   flex-basis: 100%;
   margin-top: 4px;
