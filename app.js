@@ -1322,6 +1322,7 @@ function renderAppointments() {
     row.innerHTML = `
       <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
       <td>${formatDate(appointment.appointmentDate)}</td>
+      <td>${getHebrewDay(appointment.appointmentDate)}</td>
       <td>${escapeHtml(appointment.appointmentTime || "")}</td>
       <td>${escapeHtml(appointment.customerName)}${autoFollowUpBadge}</td>
       <td>${phoneHtml}</td>
