@@ -146,17 +146,20 @@
               <button class="range-button" type="button" data-range="specific">תאריך</button>
               <input id="specificRangeDate" type="date" class="range-date hidden" aria-label="תאריך מסוים" />
             </div>
-            <div class="metric">
+            <div class="metric" title="סך כל ההכנסות מעבודות שנמסרו — כולל מע&quot;מ. הצעות מחיר ועבודות פתוחות (טרם נמסרו) לא נכללות.">
               <span>סה"כ הכנסות</span>
               <strong id="revenueMetric">₪0</strong>
+              <small class="metric-hint">כולל מע"מ · רק עבודות שנמסרו</small>
             </div>
-            <div class="metric">
+            <div class="metric" title="עלות החלקים שקנית מהספק עבור עבודות שנמסרו">
               <span>סה"כ עלויות</span>
               <strong id="costMetric">₪0</strong>
+              <small class="metric-hint">עלות חלקים למוסך</small>
             </div>
-            <div class="metric profit">
+            <div class="metric profit" title="מה שנשאר לך אחרי תשלום על החלקים ולפני העברת המע&quot;מ למדינה">
               <span>רווח נקי</span>
               <strong id="profitMetric">₪0</strong>
+              <small class="metric-hint">לפני העברת מע"מ למדינה</small>
             </div>
           </div>
 
@@ -166,11 +169,11 @@
               <input id="jobSearch" type="search" placeholder="מספר רכב, בעלים או סוג רכב" />
             </label>
             <div class="range-switch" role="group" aria-label="סינון לפי סטטוס">
-              <button class="range-button active" type="button" data-jobs-filter="open">פתוחות</button>
+              <button class="range-button" type="button" data-jobs-filter="open">פתוחות</button>
               <button class="range-button" type="button" data-jobs-filter="quote">הצעות</button>
               <button class="range-button" type="button" data-jobs-filter="rejected">נדחו</button>
               <button class="range-button" type="button" data-jobs-filter="delivered">נמסרו</button>
-              <button class="range-button" type="button" data-jobs-filter="all">הכל</button>
+              <button class="range-button active" type="button" data-jobs-filter="all">הכל</button>
             </div>
             <button class="primary-button" type="button" id="addJobButton">הוספת עבודה</button>
           </div>
@@ -184,7 +187,7 @@
                   <th>רכב</th>
                   <th>לקוח</th>
                   <th>חלקים</th>
-                  <th class="numeric">סה"כ</th>
+                  <th class="numeric" title="סה&quot;כ ששולם כולל מע&quot;מ. כדי שסכימת העמודה תשווה לבאנר — סנן ל&quot;נמסרו&quot; (הצעות ועבודות פתוחות לא נספרות בהכנסות).">סה"כ</th>
                   <th class="numeric">רווח</th>
                   <th>סטטוס</th>
                   <th class="col-actions">פעולות</th>
@@ -250,11 +253,11 @@
               <input id="deliverySearch" type="search" placeholder="מספר רכב, בעלים או סוג רכב" />
             </label>
             <div class="range-switch" role="group" aria-label="סינון לפי תאריך מסירה">
-              <button class="range-button active" type="button" data-delivery-range="upcoming">צפויות</button>
+              <button class="range-button" type="button" data-delivery-range="upcoming">צפויות</button>
               <button class="range-button" type="button" data-delivery-range="week">השבוע</button>
               <button class="range-button" type="button" data-delivery-range="month">החודש</button>
               <button class="range-button" type="button" data-delivery-range="overdue">באיחור</button>
-              <button class="range-button" type="button" data-delivery-range="all">הכל</button>
+              <button class="range-button active" type="button" data-delivery-range="all">הכל</button>
             </div>
           </div>
 
@@ -269,7 +272,7 @@
                   <th>סוג רכב</th>
                   <th>שם בעל הרכב</th>
                   <th>חלקים</th>
-                  <th>סה"כ</th>
+                  <th class="numeric" title="סה&quot;כ לתשלום כולל מע&quot;מ">סה"כ</th>
                   <th>פעולות</th>
                 </tr>
               </thead>
@@ -290,8 +293,8 @@
               <input id="appointmentSearch" type="search" placeholder="שם לקוח, טלפון, סוג רכב או סיבת הגעה" />
             </label>
             <div class="range-switch" role="group" aria-label="סינון תורים">
-              <button class="range-button active" type="button" data-appointment-range="upcoming">צפויים</button>
-              <button class="range-button" type="button" data-appointment-range="today">היום</button>
+              <button class="range-button" type="button" data-appointment-range="upcoming">צפויים</button>
+              <button class="range-button active" type="button" data-appointment-range="today">היום</button>
               <button class="range-button" type="button" data-appointment-range="tomorrow">מחר</button>
               <button class="range-button" type="button" data-appointment-range="week">השבוע</button>
               <button class="range-button" type="button" data-appointment-range="arrived">הגיעו</button>

@@ -41,17 +41,22 @@ const state = {
   // a plate-link from #jobsView opens #vehicleHistoryView — we remember
   // "jobs" so the "← חזרה" button can return there).
   previousView: null,
+  // Date-range filters default to "היום" (today) — the most common
+  // working view. Status filters default to "הכל" so no jobs are
+  // hidden by accident. User-specified split: dates = today,
+  // status/state filters = all.
   activeRange: "today",
   specificRangeDate: "",
   specificRangeMonth: "",
-  activeJobsFilter: "open",
+  activeJobsFilter: "all",
   // Set of job IDs whose expandable detail row is currently open in the
   // jobs table. Pure UI state — never persisted, never affects business logic.
   expandedJobIds: new Set(),
   // Same for the appointments table.
   expandedAppointmentIds: new Set(),
-  activeDeliveryRange: "upcoming",
-  activeAppointmentRange: "upcoming",
+  activeDeliveryRange: "all",
+  // Appointments page has a "today" tab — date filter defaults to it.
+  activeAppointmentRange: "today",
   activePartCategory: "all",
   activeInventoryCategory: "all",
   selectedPartId: null,
@@ -380,18 +385,24 @@ function bindEvents() {
         els.specificRangeMonth.classList.add("hidden");
       }
 
+      // Date range scopes both the banner AND the jobs table (and any
+      // other view that filters by jobDate). Re-render everything so
+      // the user sees a consistent slice.
       renderAnalytics();
+      renderJobs();
     });
   });
 
   els.specificRangeDate.addEventListener("change", () => {
     state.specificRangeDate = els.specificRangeDate.value;
     renderAnalytics();
+    renderJobs();
   });
 
   els.specificRangeMonth.addEventListener("change", () => {
     state.specificRangeMonth = els.specificRangeMonth.value;
     renderAnalytics();
+    renderJobs();
   });
 
   els.jobSearch.addEventListener("input", renderJobs);
@@ -1168,12 +1179,16 @@ function renderTodayView() {
   today.setHours(0, 0, 0, 0);
 
   // ---- KPI strip ----
-  // Match renderAnalytics: realized revenue = !isQuote && deliveredAt.
-  // Window: jobs delivered today (calendar day in local time).
+  // Same eligibility as the banner: delivered + non-quote. Filter
+  // window: jobDate === today (so today's deliveries show, regardless
+  // of when they were marked delivered).
   const realizedToday = state.jobs.filter((j) => {
     if (j.isQuote || !j.deliveredAt) return false;
-    return toIsoDate(new Date(j.deliveredAt)) === todayIso;
+    return j.jobDate === todayIso;
   });
+  // Gross (with VAT) so "הכנסות היום" reads as "כסף שנכנס לקופה היום",
+  // matching the banner on the jobs page (also gross, with VAT).
+  // Profit stays separate — it's take-home (subtotal − partsCost).
   const revenueToday = realizedToday.reduce((s, j) => s + getJobTotals(j).total, 0);
   const profitToday = realizedToday.reduce((s, j) => s + getJobTotals(j).profit, 0);
 
@@ -1299,8 +1314,14 @@ function renderTodayView() {
 
 function renderJobs() {
   const query = normalizeSearch(els.jobSearch.value);
-  const filter = state.activeJobsFilter || "open";
+  const filter = state.activeJobsFilter || "all";
+  // Date range from the same selector that drives the banner KPIs.
+  // Selecting "היום" / "השבוע" / "החודש" / "תאריך" now scopes the table
+  // too, so the user sees the same set of jobs that contribute to the
+  // KPI numbers above. "הכל" (range=null start/end) shows everything.
+  const { start, end } = getDateRange(state.activeRange);
   const rows = state.jobs.filter((job) => {
+    if (!isDateInRange(job.jobDate, start, end)) return false;
     const isDelivered = Boolean(job.deliveredAt);
     const isQuote = Boolean(job.isQuote);
     const isRejected = Boolean(job.rejectedAt);
@@ -1402,7 +1423,10 @@ function renderJobs() {
         </div>
       </td>
       <td class="parts-cell" title="${escapeHtml(partsSummary)}">${escapeHtml(partsSummary)}</td>
-      <td class="numeric"><strong>${formatCurrency(totals.total)}</strong></td>
+      <td class="numeric">
+        <strong>${formatCurrency(totals.total)}</strong>
+        ${!totals.taxEnabled && totals.subtotal > 0 ? '<small class="no-vat-flag" title="עבודה ללא מע&quot;מ — סה&quot;כ זהה לסכום לפני מע&quot;מ. לחץ עריכה כדי להוסיף מע&quot;מ אם נדרש.">ללא מע"מ</small>' : ''}
+      </td>
       <td class="numeric">${formatCurrency(totals.profit)}</td>
       <td>${statusPill}</td>
       <td class="col-actions">
@@ -1440,6 +1464,7 @@ function renderJobs() {
           <div><span>מחיר חלקים למוסך</span><strong>${formatCurrency(totals.partsCost)}</strong></div>
           <div><span>מחיר חלקים ללקוח</span><strong>${formatCurrency(totals.partsPrice)}</strong></div>
           <div><span>מחיר עבודה</span><strong>${formatCurrency(job.laborPrice || 0)}</strong></div>
+          <div><span>סה"כ לפני מע"מ</span><strong>${formatCurrency(totals.subtotal)}</strong></div>
           <div><span>מע"מ</span><strong>${renderTaxCell(totals)}</strong></div>
           <div><span>מועד מומלץ לחזרה</span><strong>${formatDate(job.followUpDate) || "—"}</strong></div>
         </div>
@@ -1498,8 +1523,11 @@ async function markJobDelivered(jobId) {
   store.put(job);
   await transactionDone(transaction);
   await refreshData();
-  renderJobs();
-  renderDeliveries();
+  // renderAll so the banner KPIs, dashboard, and vehicle history all
+  // update immediately. (Was renderJobs+renderDeliveries only — which
+  // left the analytics banner showing stale numbers until manual
+  // refresh.)
+  renderAll();
   showToast(`העבודה ${job.vehiclePlate} סומנה כנמסרה`);
 }
 
@@ -1542,7 +1570,7 @@ async function rejectQuote(jobId) {
   store.put(job);
   await transactionDone(transaction);
   await refreshData();
-  renderJobs();
+  renderAll();
   showToast(`הצעת המחיר עבור ${job.vehiclePlate || job.ownerName} סומנה כנדחתה`);
 }
 
@@ -1556,7 +1584,7 @@ async function unrejectQuote(jobId) {
   store.put(job);
   await transactionDone(transaction);
   await refreshData();
-  renderJobs();
+  renderAll();
   showToast(`הצעת המחיר עבור ${job.vehiclePlate || job.ownerName} הוחזרה לטאב "הצעות"`);
 }
 
@@ -1570,8 +1598,10 @@ async function markJobReopened(jobId) {
   store.put(job);
   await transactionDone(transaction);
   await refreshData();
-  renderJobs();
-  renderDeliveries();
+  // renderAll — the banner Revenue drops by this job's total the moment
+  // we re-open it (since it's no longer delivered). Was renderJobs +
+  // renderDeliveries only, which left the banner showing stale numbers.
+  renderAll();
   showToast(`העבודה ${job.vehiclePlate} הוחזרה לפתוחה`);
 }
 
@@ -1642,7 +1672,7 @@ function renderInventory() {
 
 function renderDeliveries() {
   const query = normalizeSearch(els.deliverySearch.value);
-  const rangeFilter = state.activeDeliveryRange || "upcoming";
+  const rangeFilter = state.activeDeliveryRange || "all";
 
   const candidates = state.jobs.filter((job) => {
     if (!job.deliveryDate) return false;
@@ -1754,7 +1784,7 @@ function isDeliveryInRange(days, range) {
 
 function renderAppointments() {
   const query = normalizeSearch(els.appointmentSearch.value);
-  const range = state.activeAppointmentRange || "upcoming";
+  const range = state.activeAppointmentRange || "today";
 
   const filtered = state.appointments.filter((appointment) => {
     if (!isAppointmentInRange(appointment, range)) return false;
@@ -2051,7 +2081,7 @@ async function deleteAppointment(appointmentId) {
   await transactionDone(transaction);
 
   await refreshData();
-  renderAppointments();
+  renderAll();
   showToast("התור נמחק");
 }
 
@@ -2065,7 +2095,7 @@ async function revertAppointmentArrival(appointmentId) {
   store.put(existing);
   await transactionDone(transaction);
   await refreshData();
-  renderAppointments();
+  renderAll();
   showToast(`ההגעה של ${existing.customerName} בוטלה — חזר לסטטוס "צפוי"`);
 }
 
@@ -2083,7 +2113,7 @@ async function markAppointmentNoShow(appointmentId) {
   store.put(existing);
   await transactionDone(transaction);
   await refreshData();
-  renderAppointments();
+  renderAll();
   showToast(`התור של ${existing.customerName} סומן כ"לא הגיע"`);
 }
 
@@ -2097,25 +2127,34 @@ async function restoreAppointmentFromNoShow(appointmentId) {
   store.put(existing);
   await transactionDone(transaction);
   await refreshData();
-  renderAppointments();
+  renderAll();
   showToast(`התור של ${existing.customerName} הוחזר לסטטוס "צפוי"`);
 }
 
 function renderAnalytics() {
   const { start, end } = getDateRange(state.activeRange);
+  // Money model:
+  //   total     = subtotal + VAT       (customer-paid gross)
+  //   subtotal  = partsPrice + laborPrice
+  //   partsCost = wholesale cost of parts
+  //   profit    = subtotal − partsCost  (your take-home before passing VAT to the state)
+  //
+  // Eligibility — strictly realized cash:
+  //   A job contributes only when BOTH
+  //     • !isQuote        (it's a real job, not an estimate)
+  //     • deliveredAt set (the work is done and paid for)
+  //   Open jobs (work-in-progress, no delivery yet) do NOT count.
+  //   Quotes never count (regardless of delivery state) — the isQuote
+  //   check fires first.
   const totals = state.jobs.reduce(
     (sum, job) => {
       if (!isDateInRange(job.jobDate, start, end)) return sum;
-      // Only realized income/cost/profit counts:
-      //   - quotes are non-binding estimates (no money has changed hands)
-      //   - undelivered jobs are work-in-progress (customer hasn't paid yet)
-      // Both are excluded so the banner reflects actual cash, not promises.
       if (job.isQuote) return sum;
       if (!job.deliveredAt) return sum;
-      const jobTotals = getJobTotals(job);
-      sum.revenue += jobTotals.subtotal;
-      sum.cost += jobTotals.partsCost;
-      sum.profit += jobTotals.profit;
+      const t = getJobTotals(job);
+      sum.revenue += t.total;             // GROSS, with VAT
+      sum.cost += t.partsCost;            // parts wholesale
+      sum.profit += t.profit;             // garage take-home
       return sum;
     },
     { revenue: 0, cost: 0, profit: 0 }
@@ -3515,6 +3554,7 @@ function renderVehicleHistory() {
   // exclude quotes (non-binding estimates) and undelivered jobs (open work
   // where the customer has not paid yet). Visit count below still shows all
   // jobs so the history list and the count stay consistent.
+  // Same eligibility as the global banner: delivered + non-quote.
   const realizedJobs = matchingJobs.filter((j) => !j.isQuote && j.deliveredAt);
   const totalSpend = realizedJobs.reduce((s, j) => s + getJobTotals(j).total, 0);
   const totalProfit = realizedJobs.reduce((s, j) => s + getJobTotals(j).profit, 0);
@@ -3608,7 +3648,7 @@ function renderVehicleHistory() {
       <div class="vh-visit-head">
         <div class="vh-visit-date">${formatDate(job.jobDate)}</div>
         ${statusBadge}
-        <strong class="vh-visit-total">${formatCurrency(totals.total)}</strong>
+        <strong class="vh-visit-total" title="סה&quot;כ ששולם (כולל מע&quot;מ)">${formatCurrency(totals.total)}</strong>
       </div>
       <div class="vh-visit-body">${bodyLines.join(" · ")}</div>
       ${job.notes ? `<div class="vh-visit-notes">📝 ${escapeHtml(job.notes)}</div>` : ""}
