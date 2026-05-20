@@ -18,33 +18,61 @@
         </div>
 
         <nav class="nav-list">
-          <button class="nav-button active" type="button" data-view="jobs">
-            <span aria-hidden="true">▦</span>
-            יומן עבודה
+          <button class="nav-button active" type="button" data-view="today" title="היום">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- house -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a2 2 0 0 1-2 2h-4v-7h-6v7H5a2 2 0 0 1-2-2v-9z"/></svg>
+            </span>
+            <span class="nav-label">היום</span>
           </button>
-          <button class="nav-button" type="button" data-view="inventory">
-            <span aria-hidden="true">▤</span>
-            ניהול מלאי חלקים
+          <button class="nav-button" type="button" data-view="jobs" title="יומן עבודה">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- clipboard-list -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/></svg>
+            </span>
+            <span class="nav-label">יומן עבודה</span>
           </button>
-          <button class="nav-button" type="button" data-view="deliveries">
-            <span aria-hidden="true">⊞</span>
-            מסירות צפויות
+          <button class="nav-button" type="button" data-view="inventory" title="ניהול מלאי חלקים">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- package -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5z"/><path d="M3 7v10l9 5 9-5V7"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/></svg>
+            </span>
+            <span class="nav-label">ניהול מלאי חלקים</span>
           </button>
-          <button class="nav-button" type="button" data-view="appointments">
-            <span aria-hidden="true">◰</span>
-            תורים
+          <button class="nav-button" type="button" data-view="deliveries" title="מסירות צפויות">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- truck -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 17V6H2v11h2"/><path d="M22 17h-4v-6h-4v6h-2"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><path d="M14 11h4l4 4v2"/></svg>
+            </span>
+            <span class="nav-label">מסירות צפויות</span>
           </button>
-          <button class="nav-button" type="button" data-view="whatsapp">
-            <span aria-hidden="true">▶</span>
-            שליחה ללקוח
+          <button class="nav-button" type="button" data-view="appointments" title="תורים">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- calendar -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M8 3v4M16 3v4"/></svg>
+            </span>
+            <span class="nav-label">תורים</span>
           </button>
-          <button class="nav-button" type="button" data-view="vehicleHistory">
-            <span aria-hidden="true">⌕</span>
-            היסטוריית רכב
+          <button class="nav-button" type="button" data-view="whatsapp" title="שליחה ללקוח">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- send -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+            </span>
+            <span class="nav-label">שליחה ללקוח</span>
           </button>
-          <button class="nav-button" type="button" data-view="backup">
-            <span aria-hidden="true">⇩</span>
-            גיבוי וייצוא
+          <button class="nav-button" type="button" data-view="vehicleHistory" title="היסטוריית רכב">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- car -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14"/><path d="M5 17a2 2 0 0 1-2-2v-2l2-5a3 3 0 0 1 3-2h8a3 3 0 0 1 3 2l2 5v2a2 2 0 0 1-2 2"/><circle cx="7.5" cy="17.5" r="1.5"/><circle cx="16.5" cy="17.5" r="1.5"/></svg>
+            </span>
+            <span class="nav-label">היסטוריית רכב</span>
+          </button>
+          <button class="nav-button" type="button" data-view="backup" title="הגדרות">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- gear / settings -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            </span>
+            <span class="nav-label">הגדרות</span>
           </button>
         </nav>
       </aside>
@@ -52,8 +80,8 @@
       <main class="main-panel">
         <header class="topbar">
           <div>
-            <h1 id="screenTitle">יומן עבודה</h1>
-            <p id="screenSubtitle">מעקב תיקונים יומי, חלקים, חיובים ורווחיות</p>
+            <h1 id="screenTitle">היום</h1>
+            <p id="screenSubtitle">תמונת מצב יומית — תורים, עבודות פתוחות והכנסות</p>
           </div>
           <div class="status-pill">
             <span class="status-dot" aria-hidden="true"></span>
@@ -61,7 +89,47 @@
           </div>
         </header>
 
-        <section class="view active" id="jobsView" aria-labelledby="jobsHeading">
+        <section class="view active" id="todayView" aria-labelledby="todayHeading">
+          <h2 id="todayHeading" class="visually-hidden">סקירה יומית</h2>
+          <div class="dash-kpi-strip" id="todayKpiStrip"></div>
+          <div class="dash-grid">
+            <article class="dash-card" id="todayAppointmentsCard">
+              <header class="dash-card-head">
+                <h3>תורים להיום</h3>
+                <button class="dash-card-link" type="button" data-view="appointments">לכל התורים →</button>
+              </header>
+              <div class="dash-card-body" id="todayAppointmentsBody"></div>
+            </article>
+            <article class="dash-card" id="todayOpenJobsCard">
+              <header class="dash-card-head">
+                <h3>עבודות פתוחות</h3>
+                <button class="dash-card-link" type="button" data-view="jobs">לכל העבודות →</button>
+              </header>
+              <div class="dash-card-body" id="todayOpenJobsBody"></div>
+            </article>
+            <article class="dash-card" id="todayFollowUpsCard">
+              <header class="dash-card-head">
+                <h3>חזרות מתוכננות בקרוב</h3>
+                <button class="dash-card-link" type="button" data-view="jobs">היסטוריה →</button>
+              </header>
+              <div class="dash-card-body" id="todayFollowUpsBody"></div>
+            </article>
+            <article class="dash-card" id="todayQuotesCard">
+              <header class="dash-card-head">
+                <h3>הצעות מחיר ממתינות</h3>
+                <button class="dash-card-link" type="button" data-view="jobs" data-jobs-filter="quote">לכל ההצעות →</button>
+              </header>
+              <div class="dash-card-body" id="todayQuotesBody"></div>
+            </article>
+          </div>
+          <div class="dash-quick-actions">
+            <button class="primary-button" type="button" id="dashAddJobButton">+ עבודה חדשה</button>
+            <button class="secondary-button" type="button" id="dashAddAppointmentButton">+ תור חדש</button>
+            <button class="secondary-button" type="button" id="dashAddPartButton">+ חלק במלאי</button>
+          </div>
+        </section>
+
+        <section class="view" id="jobsView" aria-labelledby="jobsHeading">
           <div class="analytics-band">
             <div class="range-switch" role="group" aria-label="בחירת טווח תאריכים">
               <button class="range-button active" type="button" data-range="today">היום</button>
@@ -102,31 +170,28 @@
           </div>
 
           <div class="table-wrap">
-            <table class="data-table" id="jobsTable">
+            <table class="data-table data-table-compact" id="jobsTable">
               <thead>
                 <tr>
+                  <th class="col-toggle" aria-label="פירוט"></th>
                   <th>תאריך</th>
-                  <th>יום</th>
-                  <th>מספר רכב</th>
-                  <th>סוג רכב</th>
-                  <th>שנת הרכב</th>
-                  <th>נפח מנוע</th>
-                  <th>שם בעל הרכב</th>
-                  <th>טלפון</th>
+                  <th>רכב</th>
+                  <th>לקוח</th>
                   <th>חלקים</th>
-                  <th>מחיר חלקים למוסך</th>
-                  <th>מחיר חלקים ללקוח</th>
-                  <th>מחיר עבודה</th>
-                  <th>מע"מ</th>
-                  <th>סה"כ</th>
-                  <th>רווח</th>
-                  <th>תאריך מסירה</th>
-                  <th>פעולות</th>
+                  <th class="numeric">סה"כ</th>
+                  <th class="numeric">רווח</th>
+                  <th>סטטוס</th>
+                  <th class="col-actions">פעולות</th>
                 </tr>
               </thead>
               <tbody id="jobsBody"></tbody>
             </table>
-            <div class="empty-state hidden" id="jobsEmpty">אין עבודות להצגה</div>
+            <div class="empty-state hidden" id="jobsEmpty">
+              <div class="empty-state-icon" aria-hidden="true">▦</div>
+              <div class="empty-state-title">אין עבודות להצגה</div>
+              <div class="empty-state-text">התחל ביצירת עבודה חדשה — חלקים יוצרכו אוטומטית מהמלאי וסה"כ לתשלום יחושב עם מע"מ.</div>
+              <button class="primary-button empty-state-cta" type="button" data-empty-add="job">+ עבודה חדשה</button>
+            </div>
           </div>
         </section>
 
@@ -163,7 +228,12 @@
               </thead>
               <tbody id="inventoryBody"></tbody>
             </table>
-            <div class="empty-state hidden" id="inventoryEmpty">אין חלקים במלאי</div>
+            <div class="empty-state hidden" id="inventoryEmpty">
+              <div class="empty-state-icon" aria-hidden="true">▤</div>
+              <div class="empty-state-title">אין חלקים במלאי</div>
+              <div class="empty-state-text">הוסף חלקים שאתה מחזיק בקביעות. כל חלק עם מק"ט, מחיר עלות (למוסך) ומחיר מכירה (ללקוח) יופיע אוטומטית בבחירת חלקים לעבודה.</div>
+              <button class="primary-button empty-state-cta" type="button" data-empty-add="part">+ חלק חדש</button>
+            </div>
           </div>
         </section>
 
@@ -199,7 +269,11 @@
               </thead>
               <tbody id="deliveriesBody"></tbody>
             </table>
-            <div class="empty-state hidden" id="deliveriesEmpty">אין מסירות להצגה</div>
+            <div class="empty-state hidden" id="deliveriesEmpty">
+              <div class="empty-state-icon" aria-hidden="true">⊞</div>
+              <div class="empty-state-title">אין מסירות להצגה</div>
+              <div class="empty-state-text">כשתזין תאריך מסירה בעבודה, היא תופיע כאן ממוינת לפי דחיפות (איחור / היום / השבוע).</div>
+            </div>
           </div>
         </section>
 
@@ -222,25 +296,26 @@
           </div>
 
           <div class="table-wrap">
-            <table class="data-table" id="appointmentsTable">
+            <table class="data-table data-table-compact" id="appointmentsTable">
               <thead>
                 <tr>
-                  <th>סטטוס</th>
-                  <th>תאריך</th>
-                  <th>יום</th>
-                  <th>שעה</th>
-                  <th>שם הלקוח</th>
-                  <th>טלפון</th>
-                  <th>מספר רכב</th>
-                  <th>סוג רכב</th>
+                  <th class="col-toggle" aria-label="פירוט"></th>
+                  <th>מתי</th>
+                  <th>לקוח</th>
+                  <th>רכב</th>
                   <th>סיבת הגעה</th>
-                  <th>הערות</th>
-                  <th>פעולות</th>
+                  <th>סטטוס</th>
+                  <th class="col-actions">פעולות</th>
                 </tr>
               </thead>
               <tbody id="appointmentsBody"></tbody>
             </table>
-            <div class="empty-state hidden" id="appointmentsEmpty">אין תורים להצגה</div>
+            <div class="empty-state hidden" id="appointmentsEmpty">
+              <div class="empty-state-icon" aria-hidden="true">◰</div>
+              <div class="empty-state-title">אין תורים להצגה</div>
+              <div class="empty-state-text">תאם הגעה עם הלקוחות שלך — בהגעת הלקוח אפשר לפתוח עבודה חדשה ישירות מהתור.</div>
+              <button class="primary-button empty-state-cta" type="button" data-empty-add="appointment">+ תור חדש</button>
+            </div>
           </div>
         </section>
 
@@ -298,6 +373,10 @@
         </section>
 
         <section class="view" id="vehicleHistoryView" aria-labelledby="vehicleHistoryHeading">
+          <button class="back-button" type="button" id="vehicleHistoryBackButton" aria-label="חזרה למסך הקודם">
+            <span aria-hidden="true">→</span>
+            חזרה
+          </button>
           <div class="vh-toolbar">
             <label class="search-box vh-search">
               <span>חיפוש לפי מספר רכב</span>
@@ -385,59 +464,90 @@
     </div>
 
     <div class="modal-backdrop hidden" id="jobModal" role="dialog" aria-modal="true" aria-labelledby="jobModalTitle">
-      <form class="modal" id="jobForm">
+      <form class="modal modal-wide" id="jobForm">
         <div class="modal-header">
           <h2 id="jobModalTitle">הוספת עבודה</h2>
+          <div class="job-mode-toggle" role="group" aria-label="סוג רישום">
+            <button class="job-mode-option active" type="button" data-job-mode="job">עבודה</button>
+            <button class="job-mode-option" type="button" data-job-mode="quote">הצעת מחיר</button>
+            <input type="checkbox" id="isQuote" name="isQuote" hidden />
+          </div>
           <button class="icon-button" type="button" data-close-modal="jobModal" aria-label="סגירה">×</button>
         </div>
 
-        <div class="form-grid">
-          <label>
-            תאריך
-            <input name="jobDate" type="date" required />
-          </label>
-          <label>
-            מספר רכב
-            <input name="vehiclePlate" type="text" required autocomplete="off" />
-          </label>
-          <label>
-            סוג רכב
-            <input name="vehicleModel" type="text" list="vehicleModels" autocomplete="off" />
-            <datalist id="vehicleModels">
-              <option value="טויוטה קורולה"></option>
-              <option value="יונדאי i30"></option>
-              <option value="קיה ספורטאז'"></option>
-              <option value="מאזדה 3"></option>
-              <option value="סקודה אוקטביה"></option>
-            </datalist>
-          </label>
-          <label>
-            שנת הרכב
-            <input name="vehicleYear" type="number" min="1950" max="2100" inputmode="numeric" />
-          </label>
-          <label>
-            נפח מנוע
-            <input name="engineDisplacement" type="number" min="0" inputmode="numeric" />
-          </label>
-          <label>
-            שם בעל הרכב
-            <input name="ownerName" type="text" autocomplete="off" />
-          </label>
-          <label>
-            טלפון בעל הרכב
-            <input name="phoneNumber" type="tel" autocomplete="off" inputmode="tel" />
-          </label>
-          <label>
-            ק"מ ברכב
-            <input name="mileage" type="number" min="0" step="1" inputmode="numeric" placeholder="לדוגמה: 65443" />
-          </label>
-          <label>
-            תאריך מסירה
-            <input name="deliveryDate" type="date" />
-          </label>
-        </div>
+        <nav class="modal-tabs" role="tablist" aria-label="שלבי טופס">
+          <button class="modal-tab active" type="button" role="tab" data-modal-tab="info">
+            <span class="modal-tab-num">1</span>
+            <span class="modal-tab-label">פרטים בסיסיים</span>
+          </button>
+          <button class="modal-tab" type="button" role="tab" data-modal-tab="parts">
+            <span class="modal-tab-num">2</span>
+            <span class="modal-tab-label">חלקים ועלויות</span>
+          </button>
+          <button class="modal-tab" type="button" role="tab" data-modal-tab="notes">
+            <span class="modal-tab-num">3</span>
+            <span class="modal-tab-label">הערות ומעקב</span>
+          </button>
+        </nav>
 
-        <section class="parts-picker">
+        <!-- TAB 1: BASIC DETAILS (vehicle + customer + dates) -->
+        <section class="modal-pane active" data-modal-pane="info" role="tabpanel">
+          <div class="form-section">
+            <div class="form-section-head">
+              <h3>פרטי הרכב</h3>
+              <p class="form-section-hint">מספר הרישוי ממלא אוטומטית את היצרן, הדגם, השנה ונפח המנוע</p>
+            </div>
+            <div class="form-grid">
+              <label>
+                תאריך
+                <input name="jobDate" type="date" required />
+              </label>
+              <label>
+                מספר רכב
+                <input name="vehiclePlate" type="text" required autocomplete="off" placeholder="123-45-678" />
+              </label>
+              <label>
+                סוג רכב
+                <input name="vehicleModel" type="text" autocomplete="off" placeholder="ימולא אוטומטית ממספר הרכב" />
+              </label>
+              <label>
+                שנת הרכב
+                <input name="vehicleYear" type="number" min="1950" max="2100" inputmode="numeric" />
+              </label>
+              <label>
+                נפח מנוע
+                <input name="engineDisplacement" type="number" min="0" inputmode="numeric" />
+              </label>
+              <label>
+                ק"מ ברכב
+                <input name="mileage" type="number" min="0" step="1" inputmode="numeric" placeholder="לדוגמה: 65443" />
+              </label>
+            </div>
+          </div>
+          <div class="form-section">
+            <div class="form-section-head">
+              <h3>פרטי הלקוח</h3>
+            </div>
+            <div class="form-grid">
+              <label>
+                שם בעל הרכב
+                <input name="ownerName" type="text" autocomplete="off" />
+              </label>
+              <label>
+                טלפון
+                <input name="phoneNumber" type="tel" autocomplete="off" inputmode="tel" placeholder="050-1234567" />
+              </label>
+              <label>
+                תאריך מסירה
+                <input name="deliveryDate" type="date" />
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 2: PARTS + LABOR + TOTALS -->
+        <section class="modal-pane" data-modal-pane="parts" role="tabpanel" hidden>
+          <section class="parts-picker">
           <div class="section-title">
             <h3>חלקים לעבודה</h3>
             <div class="button-row tight">
@@ -502,24 +612,25 @@
           <div class="selected-parts" id="selectedParts"></div>
         </section>
 
-        <div class="tax-controls financial-controls">
-          <label class="labor-field">
-            <span>מחיר עבודה (לפני מע"מ)</span>
-            <input name="laborPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" />
-          </label>
-          <label class="checkbox-line">
-            <input type="checkbox" id="taxEnabled" name="taxEnabled" checked />
-            <span>כלול מע"מ בחשבון ללקוח</span>
-          </label>
-          <label class="tax-rate-field">
-            אחוז מע"מ
-            <input type="number" id="taxRate" name="taxRate" min="0" max="100" step="0.5" value="18" />
-            <span aria-hidden="true">%</span>
-          </label>
-          <label class="checkbox-line quote-toggle">
-            <input type="checkbox" id="isQuote" name="isQuote" />
-            <span>זוהי הצעת מחיר (לא תיגרע מהמלאי עד אישור)</span>
-          </label>
+        <div class="form-section">
+          <div class="form-section-head">
+            <h3>עלויות ומע"מ</h3>
+          </div>
+          <div class="tax-controls financial-controls">
+            <label class="labor-field">
+              <span>מחיר עבודה (לפני מע"מ)</span>
+              <input name="laborPrice" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0" />
+            </label>
+            <label class="checkbox-line">
+              <input type="checkbox" id="taxEnabled" name="taxEnabled" checked />
+              <span>כלול מע"מ בחשבון ללקוח</span>
+            </label>
+            <label class="tax-rate-field">
+              אחוז מע"מ
+              <input type="number" id="taxRate" name="taxRate" min="0" max="100" step="0.5" value="18" />
+              <span aria-hidden="true">%</span>
+            </label>
+          </div>
         </div>
 
         <div class="totals-strip">
@@ -527,29 +638,43 @@
           <span>מחיר חלקים ללקוח: <strong id="draftPartsPrice">₪0</strong></span>
           <span>סה"כ לפני מע"מ: <strong id="draftSubtotal">₪0</strong></span>
           <span class="tax-line" id="draftTaxLine">מע"מ (<span id="draftTaxRateLabel">18</span>%): <strong id="draftTaxAmount">₪0</strong></span>
-          <span>סה"כ לתשלום: <strong id="draftTotal">₪0</strong></span>
-          <span>רווח: <strong id="draftProfit">₪0</strong></span>
+          <span class="grand-total">סה"כ לתשלום: <strong id="draftTotal">₪0</strong></span>
+          <span class="profit-pill">רווח: <strong id="draftProfit">₪0</strong></span>
         </div>
+        </section>
 
-        <div class="job-notes-section">
-          <h3>הערות ומעקב</h3>
-          <p class="job-notes-hint">למשל: "ביקור בדיקה — בלמים תקינים", "ממליץ על החלפת שמן בעוד 5,000 ק"מ", "אזהרת חיווי במחשב — לחזור לבדיקה". אפשר להזין מועד מומלץ לחזרה (אופציונלי).</p>
-          <div class="job-notes-grid">
+        <!-- TAB 3: NOTES + FOLLOW-UP -->
+        <section class="modal-pane" data-modal-pane="notes" role="tabpanel" hidden>
+          <div class="form-section">
+            <div class="form-section-head">
+              <h3>סיכום הביקור</h3>
+              <p class="form-section-hint">מה נעשה? מה נמצא? איזה המלצה ללקוח? הערות אלה יופיעו בהיסטוריית הרכב ובחשבונית/הצעה.</p>
+            </div>
             <label class="notes-textarea-label">
-              סיכום הביקור / הערות
-              <textarea name="notes" rows="3" placeholder="מה נעשה? מה נמצא? מה ההמלצה ללקוח?"></textarea>
-            </label>
-            <label>
-              מועד מומלץ לחזרה
-              <input name="followUpDate" type="date" />
+              סיכום / הערות
+              <textarea name="notes" rows="6" placeholder="לדוגמה: בדיקה כללית בוצעה. בלמים תקינים, צמיגים במצב טוב. ממליץ להחליף שמן בעוד 5,000 ק&quot;מ."></textarea>
             </label>
           </div>
-        </div>
+          <div class="form-section">
+            <div class="form-section-head">
+              <h3>מעקב</h3>
+              <p class="form-section-hint">מועד מומלץ לחזרה — ייצור אוטומטית תור בעמוד "תורים ופגישות" באותו תאריך</p>
+            </div>
+            <div class="form-grid">
+              <label>
+                מועד מומלץ לחזרה
+                <input name="followUpDate" type="date" />
+              </label>
+            </div>
+          </div>
+        </section>
 
         <p class="form-error hidden" id="jobError"></p>
 
         <div class="modal-actions">
           <button class="secondary-button" type="button" data-close-modal="jobModal">ביטול</button>
+          <button class="secondary-button" type="button" id="jobPrevTabButton" hidden>→ הקודם</button>
+          <button class="secondary-button" type="button" id="jobNextTabButton">הבא ←</button>
           <button class="primary-button" type="submit">שמירה</button>
         </div>
       </form>

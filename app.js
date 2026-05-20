@@ -36,11 +36,20 @@ const state = {
   whatsappSource: "job",
   whatsappSelectedId: null,
   activeVehiclePlate: "",
-  activeView: "jobs",
+  activeView: "today",
+  // The view the user was on before clicking into a sub-view (e.g. clicking
+  // a plate-link from #jobsView opens #vehicleHistoryView — we remember
+  // "jobs" so the "← חזרה" button can return there).
+  previousView: null,
   activeRange: "today",
   specificRangeDate: "",
   specificRangeMonth: "",
   activeJobsFilter: "open",
+  // Set of job IDs whose expandable detail row is currently open in the
+  // jobs table. Pure UI state — never persisted, never affects business logic.
+  expandedJobIds: new Set(),
+  // Same for the appointments table.
+  expandedAppointmentIds: new Set(),
   activeDeliveryRange: "upcoming",
   activeAppointmentRange: "upcoming",
   activePartCategory: "all",
@@ -200,6 +209,7 @@ function cacheElements() {
   els.screenSubtitle = document.querySelector("#screenSubtitle");
   els.navButtons = Array.from(document.querySelectorAll(".nav-button"));
   els.views = {
+    today: document.querySelector("#todayView"),
     jobs: document.querySelector("#jobsView"),
     inventory: document.querySelector("#inventoryView"),
     deliveries: document.querySelector("#deliveriesView"),
@@ -208,6 +218,17 @@ function cacheElements() {
     vehicleHistory: document.querySelector("#vehicleHistoryView"),
     backup: document.querySelector("#backupView")
   };
+  // Dashboard ("היום") DOM references — populated by renderTodayView. The
+  // dashboard is a read-only projection over state.jobs and state.appointments
+  // so it can NEVER mutate the business model.
+  els.todayKpiStrip = document.querySelector("#todayKpiStrip");
+  els.todayAppointmentsBody = document.querySelector("#todayAppointmentsBody");
+  els.todayOpenJobsBody = document.querySelector("#todayOpenJobsBody");
+  els.todayFollowUpsBody = document.querySelector("#todayFollowUpsBody");
+  els.todayQuotesBody = document.querySelector("#todayQuotesBody");
+  els.dashAddJobButton = document.querySelector("#dashAddJobButton");
+  els.dashAddAppointmentButton = document.querySelector("#dashAddAppointmentButton");
+  els.dashAddPartButton = document.querySelector("#dashAddPartButton");
 
   els.rangeButtons = Array.from(document.querySelectorAll("[data-range]"));
   els.specificRangeDate = document.querySelector("#specificRangeDate");
@@ -319,7 +340,18 @@ function cacheElements() {
 
 function bindEvents() {
   els.navButtons.forEach((button) => {
-    button.addEventListener("click", () => switchView(button.dataset.view));
+    button.addEventListener("click", () => {
+      switchView(button.dataset.view);
+      // The slim rail expands on hover OR focus. After click, blur the
+      // button and move focus to the main panel so the rail collapses
+      // back to icon-only width and the active view gets keyboard focus.
+      button.blur();
+      const main = document.querySelector(".main-panel");
+      if (main) {
+        main.setAttribute("tabindex", "-1");
+        main.focus({ preventScroll: true });
+      }
+    });
   });
 
   els.rangeButtons.forEach((button) => {
@@ -400,11 +432,182 @@ function bindEvents() {
   els.partPickerSearch.addEventListener("input", renderPartPicker);
   els.addJobButton.addEventListener("click", () => openJobModal());
   els.addPartButton.addEventListener("click", () => openPartModal());
+  // Dashboard quick-actions: same modals/handlers as the in-view buttons.
+  // No new logic — just convenience entry points from the "היום" screen.
+  if (els.dashAddJobButton) {
+    els.dashAddJobButton.addEventListener("click", () => openJobModal());
+  }
+  if (els.dashAddAppointmentButton) {
+    els.dashAddAppointmentButton.addEventListener("click", () => openAppointmentModal());
+  }
+  if (els.dashAddPartButton) {
+    els.dashAddPartButton.addEventListener("click", () => openPartModal());
+  }
+  // Empty-state CTAs scattered across views — same modal triggers.
+  document.querySelectorAll("[data-empty-add]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const what = btn.dataset.emptyAdd;
+      if (what === "job") openJobModal();
+      else if (what === "part") openPartModal();
+      else if (what === "appointment") openAppointmentModal();
+    });
+  });
+  // <details> doesn't auto-close on outside-click OR on inside-menu-item-
+  // click. Cover both:
+  //   1. Clicking outside any open kebab → close all open kebabs.
+  //   2. Clicking a button *inside* the menu → close THIS kebab, otherwise
+  //      it stays visually open behind the modal that the click triggered.
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    const insideKebab = target.closest("details.row-kebab");
+    if (insideKebab) {
+      // If the click was on a button inside the menu (an action), close
+      // the menu so it doesn't linger after the modal opens.
+      if (target.closest(".row-kebab-menu") && target.tagName === "BUTTON") {
+        insideKebab.open = false;
+      }
+      // Close any OTHER kebabs that happen to be open.
+      document.querySelectorAll("details.row-kebab[open]").forEach((d) => {
+        if (d !== insideKebab) d.open = false;
+      });
+    } else {
+      // Click was fully outside any kebab — close all of them.
+      document.querySelectorAll("details.row-kebab[open]").forEach((d) => (d.open = false));
+    }
+  });
+
+  // The kebab row-menu uses position: fixed so it lives outside any
+  // table layout entirely — that prevents it from triggering horizontal
+  // scrollbars or being clipped by a table-wrap with overflow-x. We
+  // compute top/left dynamically on each open so the menu lands where
+  // it makes sense relative to the summary button.
+  const positionKebabMenu = (details) => {
+    const summary = details.querySelector("summary");
+    const menu = details.querySelector(".row-kebab-menu");
+    if (!summary || !menu) return;
+    // Ensure the menu has a measurable layout but is invisible until
+    // placed; otherwise users would see a flash at the wrong spot.
+    menu.style.top = "-9999px";
+    menu.style.left = "-9999px";
+    menu.style.display = "flex";
+    const sRect = summary.getBoundingClientRect();
+    const mRect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const gap = 6;
+
+    // Vertical: place below the summary; flip above if it would
+    // overflow the viewport bottom.
+    let top = sRect.bottom + gap;
+    if (top + mRect.height > vh - 8) {
+      top = Math.max(8, sRect.top - mRect.height - gap);
+    }
+
+    // Horizontal placement: in RTL, the natural drop is the menu's
+    // RIGHT edge aligned with the summary's RIGHT edge (menu hangs to
+    // the LEFT). But the actions column is the visually-leftmost cell
+    // in RTL, so the menu would overflow the left edge. Detect that
+    // and flip to anchor the menu's LEFT edge to the summary's LEFT
+    // edge instead (menu hangs to the RIGHT, into the page center).
+    // For LTR the logic mirrors.
+    const isRTL = getComputedStyle(document.documentElement).direction === "rtl";
+    let left;
+    if (isRTL) {
+      // Try right-anchored first.
+      const rightAnchored = sRect.right - mRect.width;
+      if (rightAnchored >= 8) {
+        left = rightAnchored;
+      } else {
+        // Flip: anchor to summary's LEFT edge.
+        left = sRect.left;
+      }
+    } else {
+      const leftAnchored = sRect.left;
+      if (leftAnchored + mRect.width <= vw - 8) {
+        left = leftAnchored;
+      } else {
+        left = sRect.right - mRect.width;
+      }
+    }
+    // Final safety clamp so the menu never spills off either edge.
+    left = Math.max(8, Math.min(left, vw - mRect.width - 8));
+
+    menu.style.top = `${top}px`;
+    menu.style.left = `${left}px`;
+  };
+
+  document.addEventListener("toggle", (event) => {
+    const d = event.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.classList.contains("row-kebab")) return;
+    if (!d.open) return;
+    // Wait one frame so the menu has a measurable layout before we
+    // place it.
+    requestAnimationFrame(() => positionKebabMenu(d));
+  }, true);
+
+  // Re-position any open kebab menus on resize or scroll so they stay
+  // anchored to their summary.
+  const repositionOpenKebabs = () => {
+    document.querySelectorAll("details.row-kebab[open]").forEach(positionKebabMenu);
+  };
+  window.addEventListener("resize", repositionOpenKebabs);
+  window.addEventListener("scroll", repositionOpenKebabs, { passive: true, capture: true });
+  // Dashboard card "→" links navigate to the corresponding view. The
+  // optional data-jobs-filter attribute pre-selects a tab on the jobs view.
+  document.querySelectorAll(".dash-card-link[data-view]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const view = btn.dataset.view;
+      const jobsFilter = btn.dataset.jobsFilter;
+      if (jobsFilter && view === "jobs") {
+        state.activeJobsFilter = jobsFilter;
+        els.jobsFilterButtons.forEach((b) =>
+          b.classList.toggle("active", b.dataset.jobsFilter === jobsFilter)
+        );
+      }
+      switchView(view);
+      if (view === "jobs") renderJobs();
+    });
+  });
   els.toggleInlinePartButton.addEventListener("click", showInlinePartPanel);
   els.cancelInlinePartButton.addEventListener("click", hideInlinePartPanel);
   els.saveInlinePartButton.addEventListener("click", saveInlinePart);
   els.inlinePartTemporary.addEventListener("change", updateInlinePartMode);
   els.jobForm.addEventListener("submit", saveJobFromForm);
+
+  // Job modal tab navigation. The tabs are pure presentation — clicking
+  // one only swaps which form section is visible; no form values change.
+  document.querySelectorAll("#jobModal [data-modal-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => switchJobModalTab(btn.dataset.modalTab));
+  });
+  const jobNextBtn = document.getElementById("jobNextTabButton");
+  const jobPrevBtn = document.getElementById("jobPrevTabButton");
+  const tabOrder = ["info", "parts", "notes"];
+  if (jobNextBtn) {
+    jobNextBtn.addEventListener("click", () => {
+      const active = document.querySelector("#jobModal [data-modal-tab].active");
+      const idx = tabOrder.indexOf(active ? active.dataset.modalTab : "info");
+      if (idx < tabOrder.length - 1) switchJobModalTab(tabOrder[idx + 1]);
+    });
+  }
+  if (jobPrevBtn) {
+    jobPrevBtn.addEventListener("click", () => {
+      const active = document.querySelector("#jobModal [data-modal-tab].active");
+      const idx = tabOrder.indexOf(active ? active.dataset.modalTab : "info");
+      if (idx > 0) switchJobModalTab(tabOrder[idx - 1]);
+    });
+  }
+
+  // Job-mode pill toggle (עבודה / הצעת מחיר). The toggle drives the
+  // hidden #isQuote checkbox which existing save/validate code already
+  // reads — so swapping modes here doesn't require any logic changes.
+  document.querySelectorAll("#jobModal [data-job-mode]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const isQuote = btn.dataset.jobMode === "quote";
+      els.isQuote.checked = isQuote;
+      els.isQuote.dispatchEvent(new Event("change", { bubbles: true }));
+      syncJobModeToggleFromCheckbox();
+    });
+  });
   els.partForm.addEventListener("submit", savePartFromForm);
   els.inlinePartCategory.addEventListener("change", handleCategorySelectChange);
   els.partCategorySelect.addEventListener("change", handleCategorySelectChange);
@@ -442,6 +645,15 @@ function bindEvents() {
   });
   els.whatsappSendButton.addEventListener("click", sendWhatsapp);
   els.whatsappInvoiceButton.addEventListener("click", downloadInvoiceForWhatsapp);
+
+  // Back button on vehicleHistory returns to whichever primary view the
+  // user was on when they followed a plate-link into the history page.
+  const vhBack = document.getElementById("vehicleHistoryBackButton");
+  if (vhBack) {
+    vhBack.addEventListener("click", () => {
+      switchView(state.previousView || "jobs");
+    });
+  }
 
   els.vehicleHistorySearch.addEventListener("input", () => {
     const q = els.vehicleHistorySearch.value;
@@ -605,6 +817,7 @@ function renderAll() {
   renderBusinessSettings();
   renderWhatsappSourceList();
   renderVehicleHistory();
+  renderTodayView();
 }
 
 function normalizePlate(plate) {
@@ -848,8 +1061,46 @@ async function createCategory(rawLabel) {
 }
 
 async function promptAddCategory() {
-  const rawLabel = window.prompt("שם הקטגוריה החדשה?");
-  return createCategory(rawLabel);
+  // window.prompt() is unreliable / disabled in some Tauri WebView2 builds —
+  // build a small modal-style overlay with a real <input> instead. Returns
+  // the created category on save, null on cancel.
+  return new Promise((resolve) => {
+    const backdrop = document.createElement("div");
+    backdrop.className = "tiny-prompt-backdrop";
+    backdrop.innerHTML = `
+      <div class="tiny-prompt" role="dialog" aria-modal="true" aria-label="קטגוריה חדשה">
+        <h3>קטגוריה חדשה</h3>
+        <label>
+          שם הקטגוריה
+          <input type="text" class="tiny-prompt-input" maxlength="32" autocomplete="off" />
+        </label>
+        <div class="tiny-prompt-actions">
+          <button type="button" class="secondary-button" data-tiny="cancel">ביטול</button>
+          <button type="button" class="primary-button" data-tiny="save">שמירה</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+    const input = backdrop.querySelector(".tiny-prompt-input");
+    input.focus();
+
+    let resolved = false;
+    const cleanup = (value) => {
+      if (resolved) return;
+      resolved = true;
+      backdrop.remove();
+      if (value == null) resolve(null);
+      else createCategory(value).then(resolve);
+    };
+
+    backdrop.querySelector('[data-tiny="save"]').addEventListener("click", () => cleanup(input.value));
+    backdrop.querySelector('[data-tiny="cancel"]').addEventListener("click", () => cleanup(null));
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) cleanup(null); });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); cleanup(input.value); }
+      else if (e.key === "Escape") { e.preventDefault(); cleanup(null); }
+    });
+  });
 }
 
 async function handleCategorySelectChange(event) {
@@ -867,22 +1118,183 @@ async function handleCategorySelectChange(event) {
 }
 
 function switchView(view) {
+  // Remember the previous primary view (not deep-link sub-views like
+  // vehicleHistory) so the back button on sub-views can return correctly.
+  if (state.activeView && state.activeView !== view && view === "vehicleHistory") {
+    state.previousView = state.activeView;
+  }
   state.activeView = view;
   els.navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   Object.entries(els.views).forEach(([key, element]) => element.classList.toggle("active", key === view));
 
   const titles = {
+    today: ["היום", "תמונת מצב יומית — תורים, עבודות פתוחות והכנסות"],
     jobs: ["יומן עבודה", "מעקב תיקונים יומי, חלקים, חיובים ורווחיות"],
     inventory: ["ניהול מלאי חלקים", "קטלוג חלקים מקומי עם כמויות ומחירים"],
     deliveries: ["מסירות צפויות", "עבודות לפי תאריך מסירה עם סטטוס ואיחורים"],
     appointments: ["תורים ופגישות", "תיאום הגעות עם פרטי לקוח, רכב וסיבת ההגעה"],
     whatsapp: ["שליחה ללקוח", "שליחת הודעות WhatsApp ללקוחות מתוך עבודות ותורים"],
     vehicleHistory: ["היסטוריית רכב", "כל הביקורים של רכב לפי מספר רישוי"],
-    backup: ["גיבוי וייצוא", "שמירת נתונים מקומית לקבצי גיבוי ו-CSV"]
+    backup: ["הגדרות", "פרטי העסק לחשבוניות, גיבוי וייצוא נתונים, וייבוא מקובץ גיבוי"]
   };
 
   els.screenTitle.textContent = titles[view][0];
   els.screenSubtitle.textContent = titles[view][1];
+
+  // Refresh the dashboard whenever it becomes active so its read-only
+  // projection over state stays current — e.g. after the user adds a job
+  // elsewhere then comes back to "היום".
+  if (view === "today") renderTodayView();
+}
+
+/**
+ * Render the "היום" dashboard. PURE READ-ONLY projection over state.jobs
+ * and state.appointments — it never mutates either array, never writes
+ * to IndexedDB, and never modifies state shape. Adding new fields to job
+ * or appointment objects would not affect this function.
+ *
+ * The dashboard summarises:
+ *   - KPI strip: today's revenue (delivered only, matches analytics filter),
+ *     open jobs count, today's appointments count
+ *   - Today's appointments (sorted by time)
+ *   - Open jobs (not delivered, not quote, not rejected) sorted oldest-first
+ *   - Upcoming follow-up dates within the next 30 days
+ *   - Pending quotes (active, not rejected)
+ */
+function renderTodayView() {
+  if (!els.todayKpiStrip) return;
+  const todayIso = toIsoDate(new Date());
+  const today = new Date(todayIso);
+  today.setHours(0, 0, 0, 0);
+
+  // ---- KPI strip ----
+  // Match renderAnalytics: realized revenue = !isQuote && deliveredAt.
+  // Window: jobs delivered today (calendar day in local time).
+  const realizedToday = state.jobs.filter((j) => {
+    if (j.isQuote || !j.deliveredAt) return false;
+    return toIsoDate(new Date(j.deliveredAt)) === todayIso;
+  });
+  const revenueToday = realizedToday.reduce((s, j) => s + getJobTotals(j).total, 0);
+  const profitToday = realizedToday.reduce((s, j) => s + getJobTotals(j).profit, 0);
+
+  const openJobs = state.jobs.filter(
+    (j) => !j.isQuote && !j.rejectedAt && !j.deliveredAt
+  );
+  const todaysAppts = state.appointments.filter(
+    (a) => !a.arrivedAt && !a.noShowAt && a.appointmentDate === todayIso
+  );
+  const activeQuotes = state.jobs.filter((j) => j.isQuote && !j.rejectedAt);
+
+  els.todayKpiStrip.innerHTML = `
+    <div class="kpi-tile kpi-tile-revenue">
+      <span class="kpi-label">הכנסות היום</span>
+      <strong class="kpi-value">${formatCurrency(revenueToday)}</strong>
+      <span class="kpi-sub">${realizedToday.length} עבודות נמסרו</span>
+    </div>
+    <div class="kpi-tile">
+      <span class="kpi-label">רווח היום</span>
+      <strong class="kpi-value">${formatCurrency(profitToday)}</strong>
+      <span class="kpi-sub">${realizedToday.length === 0 ? "טרם נסגרה עבודה" : "לפי עבודות שנמסרו"}</span>
+    </div>
+    <div class="kpi-tile">
+      <span class="kpi-label">עבודות פתוחות</span>
+      <strong class="kpi-value kpi-value-count">${openJobs.length}</strong>
+      <span class="kpi-sub">ממתינות למסירה</span>
+    </div>
+    <div class="kpi-tile">
+      <span class="kpi-label">תורים היום</span>
+      <strong class="kpi-value kpi-value-count">${todaysAppts.length}</strong>
+      <span class="kpi-sub">${todaysAppts.length === 0 ? "ללא תורים" : "ממתינים להגעה"}</span>
+    </div>
+  `;
+
+  // ---- Today's appointments ----
+  const sortedAppts = [...todaysAppts].sort((a, b) =>
+    String(a.appointmentTime || "").localeCompare(String(b.appointmentTime || ""))
+  );
+  els.todayAppointmentsBody.innerHTML = sortedAppts.length
+    ? sortedAppts
+        .map(
+          (a) => `
+        <div class="dash-row">
+          <div class="dash-row-time">${escapeHtml(a.appointmentTime || "—")}</div>
+          <div class="dash-row-main">
+            <div class="dash-row-title">${escapeHtml(a.customerName || "—")}</div>
+            <div class="dash-row-sub">${escapeHtml(a.vehiclePlate || "")}${a.vehicleModel ? " · " + escapeHtml(a.vehicleModel) : ""}${a.reason ? " · " + escapeHtml(a.reason) : ""}</div>
+          </div>
+        </div>`
+        )
+        .join("")
+    : `<div class="dash-empty">אין תורים מתוכננים להיום</div>`;
+
+  // ---- Open jobs (oldest first — they've been sitting longest) ----
+  const openJobsSorted = [...openJobs]
+    .sort((a, b) => String(a.jobDate || "").localeCompare(String(b.jobDate || "")))
+    .slice(0, 6);
+  els.todayOpenJobsBody.innerHTML = openJobsSorted.length
+    ? openJobsSorted
+        .map((j) => {
+          const totals = getJobTotals(j);
+          const ageDays = j.jobDate
+            ? Math.max(0, Math.floor((today - new Date(j.jobDate)) / 86400000))
+            : null;
+          return `
+        <div class="dash-row">
+          <div class="dash-row-time">${formatDate(j.jobDate)}</div>
+          <div class="dash-row-main">
+            <div class="dash-row-title">${escapeHtml(j.vehiclePlate || "—")}${j.ownerName ? ` · ${escapeHtml(j.ownerName)}` : ""}</div>
+            <div class="dash-row-sub">${formatCurrency(totals.total)}${ageDays !== null ? ` · ${ageDays === 0 ? "היום" : ageDays + " ימים פתוחה"}` : ""}</div>
+          </div>
+        </div>`;
+        })
+        .join("")
+    : `<div class="dash-empty">אין עבודות פתוחות — הכל סגור</div>`;
+
+  // ---- Upcoming follow-up dates (next 30 days) ----
+  const horizonIso = toIsoDate(new Date(today.getTime() + 30 * 86400000));
+  const upcomingFollowUps = state.jobs
+    .filter(
+      (j) =>
+        j.followUpDate &&
+        j.followUpDate >= todayIso &&
+        j.followUpDate <= horizonIso
+    )
+    .sort((a, b) => a.followUpDate.localeCompare(b.followUpDate))
+    .slice(0, 6);
+  els.todayFollowUpsBody.innerHTML = upcomingFollowUps.length
+    ? upcomingFollowUps
+        .map(
+          (j) => `
+        <div class="dash-row">
+          <div class="dash-row-time">${formatDate(j.followUpDate)}</div>
+          <div class="dash-row-main">
+            <div class="dash-row-title">${escapeHtml(j.vehiclePlate || "—")}${j.ownerName ? ` · ${escapeHtml(j.ownerName)}` : ""}</div>
+            <div class="dash-row-sub">${j.vehicleModel ? escapeHtml(j.vehicleModel) : "מועד מומלץ לחזרה"}</div>
+          </div>
+        </div>`
+        )
+        .join("")
+    : `<div class="dash-empty">אין חזרות מתוכננות ב-30 הימים הקרובים</div>`;
+
+  // ---- Active quotes (not yet approved or rejected) ----
+  const quotesSorted = [...activeQuotes]
+    .sort((a, b) => String(b.jobDate || "").localeCompare(String(a.jobDate || "")))
+    .slice(0, 6);
+  els.todayQuotesBody.innerHTML = quotesSorted.length
+    ? quotesSorted
+        .map((j) => {
+          const totals = getJobTotals(j);
+          return `
+        <div class="dash-row">
+          <div class="dash-row-time">${formatDate(j.jobDate)}</div>
+          <div class="dash-row-main">
+            <div class="dash-row-title">${escapeHtml(j.vehiclePlate || "—")}${j.ownerName ? ` · ${escapeHtml(j.ownerName)}` : ""}</div>
+            <div class="dash-row-sub">${formatCurrency(totals.total)} · ממתינה לאישור</div>
+          </div>
+        </div>`;
+        })
+        .join("")
+    : `<div class="dash-empty">אין הצעות מחיר ממתינות</div>`;
 }
 
 function renderJobs() {
@@ -921,61 +1333,85 @@ function renderJobs() {
     const isDelivered = Boolean(job.deliveredAt);
     const isQuote = Boolean(job.isQuote);
     const isRejected = Boolean(job.rejectedAt);
+    const isExpanded = state.expandedJobIds.has(job.id);
+
+    // Primary row + hidden detail row pair. Original 17-column dump
+    // collapses into 8 visible cells; the secondary fields live in the
+    // expand-detail row so the daily-use view stays scannable.
     const row = document.createElement("tr");
     row.tabIndex = 0;
     row.dataset.rowIndex = String(index);
+    row.dataset.jobRow = String(job.id);
+    row.classList.add("job-row");
     row.classList.toggle("selected", index === state.selectedJobRow);
     row.classList.toggle("job-delivered", isDelivered);
     row.classList.toggle("job-quote", isQuote && !isRejected);
     row.classList.toggle("job-rejected", isRejected);
 
-    // Primary action depends on state:
-    //   - rejected quote: offer un-reject so user can recover an estimate
-    //     they dismissed by mistake
-    //   - active quote: approve (becomes job) OR reject (moves to נדחו tab)
-    //   - delivered job: re-open
-    //   - open job: mark delivered
+    // Primary action depends on state (delivered / quote / rejected / open).
+    // Secondary actions all live in the kebab menu so the main cell has a
+    // single, clear CTA.
     const primaryAction = isRejected
       ? `<button class="row-action" type="button" data-job-unreject="${job.id}">↩ החזר להצעה</button>`
       : isQuote
-      ? `<button class="row-action success-action" type="button" data-job-approve="${job.id}">✓ אשר וצור עבודה</button>
-         <button class="row-action danger-action" type="button" data-job-reject="${job.id}">✗ דחה</button>`
+      ? `<button class="row-action success-action" type="button" data-job-approve="${job.id}">✓ אשר וצור עבודה</button>`
       : isDelivered
       ? `<button class="row-action" type="button" data-job-reopen="${job.id}">↩ החזר לפתוח</button>`
       : `<button class="row-action success-action" type="button" data-job-deliver="${job.id}">✓ סמן כנמסר</button>`;
 
-    // Reuse the legacy "deliverButton" name in the row template below.
-    const deliverButton = primaryAction;
-
-    const dateBadge = isRejected
-      ? ' <span class="quote-badge quote-rejected-badge">נדחתה</span>'
+    // Status pill — single source of truth for "what state is this job?".
+    const statusPill = isRejected
+      ? `<span class="status-pill-table is-rejected">הצעה נדחתה</span>`
       : isQuote
-      ? ' <span class="quote-badge">הצעה</span>'
-      : '';
+      ? `<span class="status-pill-table is-quote">הצעת מחיר</span>`
+      : isDelivered
+      ? `<span class="status-pill-table is-delivered">נמסר</span>`
+      : `<span class="status-pill-table is-open">פתוח</span>`;
+
+    // Kebab menu — secondary actions. Reject quote, edit, invoice, delete.
+    const kebabItems = [];
+    if (isQuote && !isRejected) {
+      kebabItems.push(`<button data-job-reject="${job.id}" class="danger">✗ דחה הצעה</button>`);
+    }
+    kebabItems.push(`<button data-job-edit="${job.id}">עריכה</button>`);
+    kebabItems.push(`<button data-job-invoice="${job.id}">🧾 חשבונית / הצעה</button>`);
+    kebabItems.push(`<button data-job-delete="${job.id}" class="danger">מחיקה</button>`);
+
+    const partsSummary = getPartsText(job) || "—";
 
     row.innerHTML = `
-      <td>${formatDate(job.jobDate)}${dateBadge}</td>
-      <td>${getHebrewDay(job.jobDate)}</td>
-      <td><button type="button" class="plate-link" data-vehicle-history="${escapeHtml(job.vehiclePlate)}">${escapeHtml(job.vehiclePlate)}</button></td>
-      <td>${escapeHtml(job.vehicleModel || "")}</td>
-      <td>${job.vehicleYear || ""}</td>
-      <td>${job.engineDisplacement || ""}</td>
-      <td>${escapeHtml(job.ownerName || "")}</td>
-      <td>${job.phoneNumber ? `<a href="tel:${escapeHtml(job.phoneNumber)}" class="phone-link">${escapeHtml(job.phoneNumber)}</a>` : ""}</td>
-      <td class="parts-cell" title="${escapeHtml(getPartsText(job))}">${escapeHtml(getPartsText(job))}</td>
-      <td class="numeric">${formatCurrency(totals.partsCost)}</td>
-      <td class="numeric">${formatCurrency(totals.partsPrice)}</td>
-      <td class="numeric">${formatCurrency(job.laborPrice || 0)}</td>
-      <td>${renderTaxCell(totals)}</td>
-      <td class="numeric">${formatCurrency(totals.total)}</td>
-      <td class="numeric">${formatCurrency(totals.profit)}</td>
-      <td>${formatDate(job.deliveryDate)}</td>
+      <td class="col-toggle">
+        <button class="row-expand" type="button" data-job-toggle="${job.id}" aria-expanded="${isExpanded}" aria-label="פירוט נוסף">⌄</button>
+      </td>
       <td>
+        <div class="cell-stack">
+          <strong>${formatDate(job.jobDate)}</strong>
+          <span class="cell-stack-sub">${getHebrewDay(job.jobDate)}</span>
+        </div>
+      </td>
+      <td>
+        <div class="cell-stack">
+          <button type="button" class="plate-link" data-vehicle-history="${escapeHtml(job.vehiclePlate)}">${escapeHtml(job.vehiclePlate || "—")}</button>
+          ${job.vehicleModel ? `<span class="cell-stack-sub">${escapeHtml(job.vehicleModel)}${job.vehicleYear ? " · " + job.vehicleYear : ""}</span>` : ""}
+        </div>
+      </td>
+      <td>
+        <div class="cell-stack">
+          <strong>${escapeHtml(job.ownerName || "—")}</strong>
+          ${job.phoneNumber ? `<a href="tel:${escapeHtml(job.phoneNumber)}" class="phone-link cell-stack-sub">${escapeHtml(job.phoneNumber)}</a>` : ""}
+        </div>
+      </td>
+      <td class="parts-cell" title="${escapeHtml(partsSummary)}">${escapeHtml(partsSummary)}</td>
+      <td class="numeric"><strong>${formatCurrency(totals.total)}</strong></td>
+      <td class="numeric">${formatCurrency(totals.profit)}</td>
+      <td>${statusPill}</td>
+      <td class="col-actions">
         <span class="row-actions">
-          ${deliverButton}
-          <button class="row-action" type="button" data-job-invoice="${job.id}">🧾 חשבונית</button>
-          <button class="row-action" type="button" data-job-edit="${job.id}">עריכה</button>
-          <button class="row-action danger-action" type="button" data-job-delete="${job.id}">מחיקה</button>
+          ${primaryAction}
+          <details class="row-kebab">
+            <summary aria-label="פעולות נוספות">⋯</summary>
+            <menu class="row-kebab-menu">${kebabItems.join("")}</menu>
+          </details>
         </span>
       </td>
     `;
@@ -986,8 +1422,44 @@ function renderJobs() {
     });
 
     els.jobsBody.appendChild(row);
+
+    // Build the detail row immediately after, hidden unless this job's
+    // ID is in state.expandedJobIds. This pattern keeps the DOM in sync
+    // with state without re-rendering on every toggle.
+    const detailRow = document.createElement("tr");
+    detailRow.className = "row-detail" + (isExpanded ? "" : " is-hidden");
+    detailRow.dataset.jobDetail = String(job.id);
+    detailRow.innerHTML = `
+      <td colspan="9">
+        <div class="detail-grid">
+          <div><span>שנת רכב</span><strong>${job.vehicleYear || "—"}</strong></div>
+          <div><span>נפח מנוע</span><strong>${job.engineDisplacement ? job.engineDisplacement + " סמ\"ק" : "—"}</strong></div>
+          <div><span>ק"מ ברכב</span><strong>${job.mileage ? Number(job.mileage).toLocaleString("he-IL") : "—"}</strong></div>
+          <div><span>תאריך מסירה מתוכנן</span><strong>${formatDate(job.deliveryDate) || "—"}</strong></div>
+          <div><span>תאריך מסירה בפועל</span><strong>${job.deliveredAt ? formatDate(toIsoDate(new Date(job.deliveredAt))) : "—"}</strong></div>
+          <div><span>מחיר חלקים למוסך</span><strong>${formatCurrency(totals.partsCost)}</strong></div>
+          <div><span>מחיר חלקים ללקוח</span><strong>${formatCurrency(totals.partsPrice)}</strong></div>
+          <div><span>מחיר עבודה</span><strong>${formatCurrency(job.laborPrice || 0)}</strong></div>
+          <div><span>מע"מ</span><strong>${renderTaxCell(totals)}</strong></div>
+          <div><span>מועד מומלץ לחזרה</span><strong>${formatDate(job.followUpDate) || "—"}</strong></div>
+        </div>
+        ${job.notes ? `<div class="detail-notes-block"><strong>הערות:</strong> ${escapeHtml(job.notes)}</div>` : ""}
+      </td>
+    `;
+    els.jobsBody.appendChild(detailRow);
   });
 
+  // Bind all action handlers — same data-attribute API as before, so the
+  // business-logic functions (markJobDelivered, approveQuote, etc.) need
+  // no changes whatsoever.
+  els.jobsBody.querySelectorAll("[data-job-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.jobToggle);
+      if (state.expandedJobIds.has(id)) state.expandedJobIds.delete(id);
+      else state.expandedJobIds.add(id);
+      renderJobs();
+    });
+  });
   els.jobsBody.querySelectorAll("[data-job-edit]").forEach((button) => {
     button.addEventListener("click", () => openJobModal(Number(button.dataset.jobEdit)));
   });
@@ -1301,10 +1773,8 @@ function renderAppointments() {
   filtered.forEach((appointment) => {
     const arrived = Boolean(appointment.arrivedAt);
     const noShow = Boolean(appointment.noShowAt) && !arrived;
+    const isExpanded = state.expandedAppointmentIds.has(appointment.id);
     const days = getDaysUntil(appointment.appointmentDate);
-    // Status precedence: arrived > no-show > pending-by-date. If both
-    // arrivedAt and noShowAt exist for some reason, arrived wins because
-    // the customer ultimately showed up.
     const statusClass = arrived
       ? "arrived"
       : noShow
@@ -1320,47 +1790,89 @@ function renderAppointments() {
     if (arrived) row.classList.add("appointment-arrived");
     if (noShow) row.classList.add("appointment-noshow");
 
-    const phoneHtml = appointment.phoneNumber
-      ? `<a href="tel:${escapeHtml(appointment.phoneNumber)}" class="phone-link">${escapeHtml(appointment.phoneNumber)}</a>`
-      : "";
-
     const autoFollowUpBadge = appointment.sourceJobId
       ? ' <small class="auto-followup-badge" title="נוצר אוטומטית מתאריך חזרה של עבודה">🔁 מעקב</small>'
       : '';
 
-    // Three primary-action modes:
-    //   - arrived    → undo arrival (rename old "↩ סמן כלא הגיע" to "↩ בטל הגעה"
-    //                  to disambiguate from the real no-show action below)
-    //   - noShow     → restore to pending
-    //   - pending    → either mark arrived (opens job form) OR mark as no-show
-    const arriveButtonHtml = arrived
+    // Status pill — same vocabulary as the jobs table for consistency.
+    const statusPillClass = arrived ? "is-delivered" : noShow ? "is-rejected" : "is-open";
+    const statusPill = `<span class="status-pill-table ${statusPillClass}">${statusLabel}</span>`;
+
+    // Primary action mirrors the previous behaviour but moves edit/delete
+    // (and the secondary status flip) into a kebab menu.
+    const primaryAction = arrived
       ? `<button class="row-action" type="button" data-appointment-revert="${appointment.id}">↩ בטל הגעה</button>`
       : noShow
       ? `<button class="row-action" type="button" data-appointment-restore="${appointment.id}">↩ החזר לצפוי</button>`
-      : `<button class="row-action success-action" type="button" data-appointment-arrive="${appointment.id}">✓ הגיע - פתח עבודה</button>
-         <button class="row-action danger-action" type="button" data-appointment-noshow="${appointment.id}">✗ לא הגיע</button>`;
+      : `<button class="row-action success-action" type="button" data-appointment-arrive="${appointment.id}">✓ הגיע - פתח עבודה</button>`;
+
+    const kebabItems = [];
+    if (!arrived && !noShow) {
+      kebabItems.push(`<button data-appointment-noshow="${appointment.id}" class="danger">✗ לא הגיע</button>`);
+    }
+    kebabItems.push(`<button data-appointment-edit="${appointment.id}">עריכה</button>`);
+    kebabItems.push(`<button data-appointment-delete="${appointment.id}" class="danger">מחיקה</button>`);
 
     row.innerHTML = `
-      <td><span class="delivery-badge ${statusClass}">${statusLabel}</span></td>
-      <td>${formatDate(appointment.appointmentDate)}</td>
-      <td>${getHebrewDay(appointment.appointmentDate)}</td>
-      <td>${escapeHtml(appointment.appointmentTime || "")}</td>
-      <td>${escapeHtml(appointment.customerName)}${autoFollowUpBadge}</td>
-      <td>${phoneHtml}</td>
-      <td>${appointment.vehiclePlate ? `<button type="button" class="plate-link" data-vehicle-history="${escapeHtml(appointment.vehiclePlate)}">${escapeHtml(appointment.vehiclePlate)}</button>` : ""}</td>
-      <td>${escapeHtml(appointment.vehicleModel || "")}</td>
-      <td>${escapeHtml(appointment.reason || "")}</td>
-      <td class="notes-cell" title="${escapeHtml(appointment.notes || "")}">${escapeHtml(appointment.notes || "")}</td>
+      <td class="col-toggle">
+        <button class="row-expand" type="button" data-appointment-toggle="${appointment.id}" aria-expanded="${isExpanded}" aria-label="פירוט נוסף">⌄</button>
+      </td>
       <td>
+        <div class="cell-stack">
+          <strong>${formatDate(appointment.appointmentDate)}${appointment.appointmentTime ? " · " + escapeHtml(appointment.appointmentTime) : ""}</strong>
+          <span class="cell-stack-sub">${getHebrewDay(appointment.appointmentDate)}</span>
+        </div>
+      </td>
+      <td>
+        <div class="cell-stack">
+          <strong>${escapeHtml(appointment.customerName || "—")}${autoFollowUpBadge}</strong>
+          ${appointment.phoneNumber ? `<a href="tel:${escapeHtml(appointment.phoneNumber)}" class="phone-link cell-stack-sub">${escapeHtml(appointment.phoneNumber)}</a>` : ""}
+        </div>
+      </td>
+      <td>
+        <div class="cell-stack">
+          ${appointment.vehiclePlate ? `<button type="button" class="plate-link" data-vehicle-history="${escapeHtml(appointment.vehiclePlate)}">${escapeHtml(appointment.vehiclePlate)}</button>` : `<span>—</span>`}
+          ${appointment.vehicleModel ? `<span class="cell-stack-sub">${escapeHtml(appointment.vehicleModel)}</span>` : ""}
+        </div>
+      </td>
+      <td>${escapeHtml(appointment.reason || "—")}</td>
+      <td>${statusPill}</td>
+      <td class="col-actions">
         <span class="row-actions">
-          ${arriveButtonHtml}
-          <button class="row-action" type="button" data-appointment-edit="${appointment.id}">עריכה</button>
-          <button class="row-action danger-action" type="button" data-appointment-delete="${appointment.id}">מחיקה</button>
+          ${primaryAction}
+          <details class="row-kebab">
+            <summary aria-label="פעולות נוספות">⋯</summary>
+            <menu class="row-kebab-menu">${kebabItems.join("")}</menu>
+          </details>
         </span>
       </td>
     `;
 
     els.appointmentsBody.appendChild(row);
+
+    // Detail row — full notes + secondary fields (phone, model duplicated
+    // for clarity, source job link).
+    const detail = document.createElement("tr");
+    detail.className = "row-detail" + (isExpanded ? "" : " is-hidden");
+    detail.dataset.appointmentDetail = String(appointment.id);
+    const sourceJob = appointment.sourceJobId
+      ? state.jobs.find((j) => j.id === appointment.sourceJobId)
+      : null;
+    detail.innerHTML = `
+      <td colspan="7">
+        <div class="detail-grid">
+          <div><span>שעה</span><strong>${escapeHtml(appointment.appointmentTime || "—")}</strong></div>
+          <div><span>טלפון</span><strong>${escapeHtml(appointment.phoneNumber || "—")}</strong></div>
+          <div><span>סוג רכב</span><strong>${escapeHtml(appointment.vehicleModel || "—")}</strong></div>
+          <div><span>סטטוס</span><strong>${statusLabel}</strong></div>
+          ${arrived ? `<div><span>זמן הגעה</span><strong>${new Date(appointment.arrivedAt).toLocaleString("he-IL")}</strong></div>` : ""}
+          ${noShow ? `<div><span>סומן כלא הגיע ב</span><strong>${new Date(appointment.noShowAt).toLocaleString("he-IL")}</strong></div>` : ""}
+          ${sourceJob ? `<div><span>מקור התור</span><strong>עבודה ${sourceJob.vehiclePlate || "—"}</strong></div>` : ""}
+        </div>
+        ${appointment.notes ? `<div class="detail-notes-block"><strong>הערות:</strong> ${escapeHtml(appointment.notes)}</div>` : ""}
+      </td>
+    `;
+    els.appointmentsBody.appendChild(detail);
   });
 
   els.appointmentsBody.querySelectorAll("[data-appointment-edit]").forEach((button) => {
@@ -1386,6 +1898,14 @@ function renderAppointments() {
   });
   els.appointmentsBody.querySelectorAll("[data-appointment-restore]").forEach((button) => {
     button.addEventListener("click", () => restoreAppointmentFromNoShow(Number(button.dataset.appointmentRestore)));
+  });
+  els.appointmentsBody.querySelectorAll("[data-appointment-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const id = Number(button.dataset.appointmentToggle);
+      if (state.expandedAppointmentIds.has(id)) state.expandedAppointmentIds.delete(id);
+      else state.expandedAppointmentIds.add(id);
+      renderAppointments();
+    });
   });
 
   els.appointmentsEmpty.classList.toggle("hidden", filtered.length > 0);
@@ -1848,11 +2368,58 @@ function openJobModal(jobId = null, prefillAppointment = null) {
   renderPartPicker();
   delete els.jobForm.elements.vehiclePlate.dataset.lastLookup;
   openModal("jobModal");
+  // Always start on tab 1 ("פרטים בסיסיים") and sync the mode toggle to the
+  // current isQuote checkbox state (which we may have just restored from the
+  // job being edited). These are pure-presentation helpers — neither modifies
+  // form values or state.
+  switchJobModalTab("info");
+  syncJobModeToggleFromCheckbox();
   requestAnimationFrame(() => els.jobForm.elements.vehiclePlate.focus());
 
   if (!jobId && prefillAppointment && prefillAppointment.vehiclePlate) {
     autofillVehicleFields(els.jobForm.elements.vehiclePlate, els.jobForm, { fillModel: true, fillYear: true, fillEngine: true });
   }
+}
+
+/**
+ * Switch the job modal to a specific tab pane. Pure DOM toggling — no
+ * form values are altered, no state is mutated beyond local UI state.
+ * The form fields in hidden panes remain in the DOM and are read in full
+ * by saveJobFromForm regardless of which tab is visible.
+ */
+function switchJobModalTab(tabName) {
+  document.querySelectorAll("#jobModal [data-modal-tab]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.modalTab === tabName);
+    btn.setAttribute("aria-selected", String(btn.dataset.modalTab === tabName));
+  });
+  document.querySelectorAll("#jobModal [data-modal-pane]").forEach((pane) => {
+    const isActive = pane.dataset.modalPane === tabName;
+    pane.classList.toggle("active", isActive);
+    pane.hidden = !isActive;
+  });
+  // Update prev/next button visibility — tab 1 hides prev, tab 3 hides next.
+  const order = ["info", "parts", "notes"];
+  const idx = order.indexOf(tabName);
+  const prevBtn = document.getElementById("jobPrevTabButton");
+  const nextBtn = document.getElementById("jobNextTabButton");
+  if (prevBtn) prevBtn.hidden = idx <= 0;
+  if (nextBtn) nextBtn.hidden = idx >= order.length - 1;
+}
+
+/**
+ * Sync the visual job-mode toggle (עבודה / הצעת מחיר) with the actual
+ * #isQuote checkbox value. The checkbox is the source of truth; the
+ * toggle is just a more visible UI for it. This lets the existing
+ * saveJobFromForm logic (which reads els.isQuote.checked) keep working
+ * unchanged.
+ */
+function syncJobModeToggleFromCheckbox() {
+  const isQuote = els.isQuote.checked;
+  document.querySelectorAll("#jobModal [data-job-mode]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.jobMode === (isQuote ? "quote" : "job"));
+  });
+  const modalEl = document.getElementById("jobModal");
+  if (modalEl) modalEl.classList.toggle("is-quote-mode", isQuote);
 }
 
 function openPartModal(partId = null) {

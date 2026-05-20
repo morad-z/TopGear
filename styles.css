@@ -1,20 +1,96 @@
+/*
+ * TopGear v0.1.16 — Workshop Dashboard design system.
+ * Industrial-editorial direction: warm ivory canvas, brass accent, Heebo
+ * typography with tabular figures for money/dates. Designed for a working
+ * garage owner glancing between cars on a desktop.
+ *
+ * IMPORTANT: keep existing variable names (--bg, --panel, --ink, --muted,
+ * --line, --accent, etc.) because the rest of the stylesheet inherits from
+ * them. New tokens are added on top — never delete an existing one.
+ *
+ * Fonts: Heebo loaded from Google Fonts with font-display: swap so the page
+ * renders immediately with the system Hebrew stack and upgrades when the
+ * remote face arrives. WebView2 caches the font after first online launch.
+ */
+@import url("https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700;900&display=swap");
+
 :root {
   color-scheme: light;
-  --bg: #f4f6f5;
-  --panel: #ffffff;
-  --panel-soft: #f1f2f2;
-  --ink: #17201b;
-  --muted: #65726b;
-  --line: #d9e0dc;
-  --accent: #d42f2f;
-  --accent-strong: #a9161b;
-  --accent-soft: #fde8e8;
-  --danger: #b3261e;
-  --danger-soft: #fdebea;
-  --warning: #8a5a00;
-  --warning-soft: #fff4d6;
-  --shadow: 0 20px 50px rgba(22, 24, 25, 0.12);
-  font-family: Arial, "Noto Sans Hebrew", sans-serif;
+
+  /* Canvas + surfaces */
+  --bg: oklch(98% 0.006 80);                  /* warm ivory paper, not pure white */
+  --panel: #ffffff;                            /* raised surface */
+  --panel-soft: oklch(96.5% 0.008 80);         /* tinted soft panel */
+  --panel-warm: oklch(95% 0.02 70);            /* warmer panel for KPI strip */
+  --panel-ink: oklch(20% 0.018 240);           /* dark surface for occasional reverse blocks */
+
+  /* Ink hierarchy */
+  --ink: oklch(22% 0.02 240);                  /* primary text */
+  --ink-2: oklch(40% 0.015 240);               /* secondary text */
+  --muted: oklch(54% 0.012 240);               /* labels / tertiary */
+  --muted-soft: oklch(70% 0.008 240);          /* placeholder */
+
+  /* Lines */
+  --line: oklch(91% 0.008 80);                 /* hairline default */
+  --line-strong: oklch(82% 0.012 80);          /* table dividers */
+
+  /* Accent: BRASS (replaces the previous red) — the "metal" of the brand */
+  --accent: oklch(58% 0.15 50);                /* primary brass */
+  --accent-strong: oklch(48% 0.16 45);         /* hover / pressed */
+  --accent-soft: oklch(95% 0.04 70);           /* subtle tint bg */
+  --accent-ink: #ffffff;                        /* text on accent */
+
+  /* Status palette — more restrained than v0.1.15 */
+  --danger: oklch(55% 0.18 28);
+  --danger-strong: oklch(48% 0.2 25);
+  --danger-soft: oklch(96% 0.025 25);
+  --warning: oklch(58% 0.14 75);
+  --warning-soft: oklch(96% 0.04 80);
+  --success: oklch(52% 0.13 145);
+  --success-soft: oklch(96% 0.025 145);
+  --quote: oklch(48% 0.15 285);
+  --quote-soft: oklch(96% 0.025 290);
+
+  /* Shadows: hairline-first, shadows reserved for elevated surfaces */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow: 0 6px 20px rgba(15, 23, 42, 0.06);
+  --shadow-lg: 0 18px 48px rgba(15, 23, 42, 0.12);
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Spacing grid (4px) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+  --space-8: 56px;
+
+  /* Type scale */
+  --font-body: "Heebo", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans Hebrew", Arial, sans-serif;
+  --text-micro: 11px;
+  --text-small: 13px;
+  --text-base: 14.5px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --text-2xl: 30px;
+  --text-display: clamp(32px, 2.6vw, 44px);
+
+  /* Motion */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration: 200ms;
+  --duration-slow: 350ms;
+
+  font-family: var(--font-body);
+  font-feature-settings: "tnum" 1, "lnum" 1;
 }
 
 * {
@@ -28,11 +104,16 @@ body {
   color: var(--ink);
   direction: rtl;
   text-align: right;
+  font-size: var(--text-base);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -40,124 +121,228 @@ button {
   cursor: pointer;
 }
 
+/* ----------------------------------------------------------------------
+   App shell: slim 64px icon rail on the right (RTL), content on the left.
+   The rail expands to 220px on hover so labels appear; on the live app
+   you can pin it open with [data-nav-pinned] but the hover behaviour is
+   the default. Keeps existing #sidebar class names so JS that toggles
+   them stays untouched.
+   ---------------------------------------------------------------------- */
+/* App shell: simple flow. The rail is fixed to the right edge of the
+   viewport (RTL) and reserves a 64px gutter on the main panel via
+   padding-inline-end. On hover the rail expands to 220px and overlays
+   the content with a shadow — no grid reflow, no layout shift. */
 .app-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
-  grid-template-areas: "main sidebar";
+  display: block;
   min-height: 100vh;
-  direction: ltr;
+  direction: rtl;
+  background: var(--bg);
 }
 
 .sidebar {
-  grid-area: sidebar;
   direction: rtl;
-  position: relative;
+  position: fixed;
+  inset-block: 0;
+  /* RTL: inset-inline-start = visual RIGHT. That's where the user
+     wants the rail in a Hebrew app — same side reading begins, easier
+     to reach with the right hand on desktop. */
+  inset-inline-start: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  /* Border on the side facing the content — visual LEFT in RTL. */
+  border-inline-end: 1px solid var(--line);
+  padding: var(--space-3) var(--space-2);
+  transition: width var(--duration) var(--ease-out),
+              box-shadow var(--duration) var(--ease-out);
+  width: 64px;
   overflow: hidden;
-  background: #161819;
-  color: #f7f7f7;
-  padding: 22px 18px;
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: -16px 0 42px rgba(22, 24, 25, 0.16);
 }
 
-.sidebar::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(155deg, rgba(212, 47, 47, 0.2), transparent 34%),
-    radial-gradient(circle at 22% 6%, rgba(255, 255, 255, 0.1), transparent 24%);
-}
-
-.sidebar > * {
-  position: relative;
-  z-index: 1;
+.sidebar:hover,
+.sidebar:focus-within {
+  width: 220px;
+  box-shadow: var(--shadow);
+  overflow: visible;
 }
 
 .brand {
-  display: grid;
-  gap: 10px;
-  margin-bottom: 26px;
-  padding: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.055);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2) var(--space-4) var(--space-2);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
 }
 
 .brand-logo {
-  display: block;
-  width: min(190px, 100%);
-  aspect-ratio: 1 / 1;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-sm);
   object-fit: contain;
-  justify-self: center;
-  filter: drop-shadow(0 12px 22px rgba(0, 0, 0, 0.35));
+  flex-shrink: 0;
+  filter: none;
+  aspect-ratio: auto;
 }
 
-.brand strong,
-.brand small {
-  display: block;
-  text-align: center;
+.brand > div {
+  min-width: 0;
+  opacity: 0;
+  transform: translateX(8px);
+  transition: opacity var(--duration) var(--ease-out),
+              transform var(--duration) var(--ease-out);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.sidebar:hover .brand > div,
+.sidebar:focus-within .brand > div {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
 }
 
 .brand strong {
-  font-size: 22px;
-  letter-spacing: 0;
+  display: block;
+  font-size: var(--text-lg);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
 
 .brand small {
-  color: #d9dddf;
-  margin-top: 3px;
+  display: block;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--muted);
+  margin-top: 2px;
 }
 
 .nav-list {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) 0;
 }
 
 .nav-button {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   width: 100%;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #eef0f0;
-  text-align: right;
+  height: 44px;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 var(--space-3);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  font-weight: 600;
+  text-align: start;
+  position: relative;
+  transition: background var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease);
+  white-space: nowrap;
+  overflow: hidden;
 }
 
-.nav-button:hover,
+.nav-button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+
 .nav-button.active {
-  background: rgba(212, 47, 47, 0.18);
-  border-color: rgba(255, 82, 82, 0.38);
-  box-shadow: inset -4px 0 0 var(--accent);
+  background: var(--accent-soft);
+  color: var(--ink);
 }
 
-.nav-button span {
+/* Brass accent strip on the active item's inside edge — the side
+   that faces the content area. The rail is on the visual RIGHT in
+   RTL (inset-inline-start: 0), so its inside edge is the visual LEFT
+   = inset-inline-end. */
+.nav-button.active::before {
+  content: "";
+  position: absolute;
+  inset-inline-end: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.nav-button .nav-icon {
   display: inline-grid;
   place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #f0c4c4;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-2);
+  flex-shrink: 0;
+  transition: color var(--duration-fast) var(--ease),
+              background var(--duration-fast) var(--ease);
 }
 
+.nav-button .nav-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-button:hover .nav-icon {
+  color: var(--ink);
+}
+
+.nav-button.active .nav-icon {
+  color: var(--accent-strong);
+}
+
+/* Label text within nav-button is everything after the icon — fade it in
+   when the rail expands. */
+.nav-button {
+  text-indent: 0;
+}
+
+.nav-label {
+  display: inline-block;
+  opacity: 0;
+  transform: translateX(6px);
+  transition: opacity var(--duration) var(--ease-out),
+              transform var(--duration) var(--ease-out);
+}
+
+.sidebar:hover .nav-label,
+.sidebar:focus-within .nav-label {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ----------------------------------------------------------------------
+   Main panel + top bar
+   ---------------------------------------------------------------------- */
 .main-panel {
-  grid-area: main;
   direction: rtl;
   min-width: 0;
-  padding: 22px;
+  padding: var(--space-5) var(--space-6);
+  /* The rail is fixed on the visual RIGHT (inset-inline-start in RTL),
+     so reserve a 64px gutter on the inline-start side so content never
+     slides under the rail. */
+  padding-inline-start: calc(var(--space-6) + 64px);
+  max-width: 1700px;
+  margin-inline: auto;
 }
 
 .topbar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
-  gap: 18px;
-  margin-bottom: 18px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
 }
 
 h1,
@@ -168,33 +353,39 @@ p {
 }
 
 h1 {
-  font-size: 30px;
-  line-height: 1.15;
+  font-size: var(--text-2xl);
+  font-weight: 900;
+  letter-spacing: -0.015em;
+  line-height: 1.1;
+  color: var(--ink);
 }
 
 .topbar p {
-  margin-top: 5px;
+  margin-top: var(--space-1);
   color: var(--muted);
+  font-size: var(--text-small);
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   white-space: nowrap;
-  border: 1px solid #f0c6c6;
-  background: #fff7f7;
-  border-radius: 8px;
-  padding: 8px 12px;
-  color: var(--accent-strong);
-  font-weight: 700;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius-pill);
+  padding: 6px var(--space-3);
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  font-weight: 600;
 }
 
 .status-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
 }
 
 .view {
@@ -321,9 +512,10 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(212, 47, 47, 0.13);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .primary-button,
@@ -532,7 +724,12 @@ select:focus {
 .modal {
   width: min(980px, 100%);
   max-height: min(92vh, 920px);
-  overflow: auto;
+  /* The modal itself must NOT scroll — that creates a second scrollbar
+     when an inner .modal-pane already scrolls. Header, tabs and actions
+     stay fixed; the pane in the middle scrolls. */
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--panel);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -966,7 +1163,11 @@ input.part-category-button.add-category-input:focus {
   margin-bottom: 8px;
 }
 
-.tax-controls .checkbox-line {
+/* Every .checkbox-line lays out as: [checkbox] [label text] in a row.
+   Overrides the global `label { display: grid }` which would stack them
+   vertically (the broken state the user saw on the "חלק זמני" checkbox
+   inside the inline-part-add panel). */
+.checkbox-line {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -975,10 +1176,22 @@ input.part-category-button.add-category-input:focus {
   cursor: pointer;
 }
 
-.tax-controls .checkbox-line input[type="checkbox"] {
+.checkbox-line input[type="checkbox"] {
   width: 18px;
   height: 18px;
   cursor: pointer;
+  margin: 0;
+  /* The form-section input rule earlier forces width:100%; restore the
+     natural checkbox size here so we don't get a giant 100%-wide
+     checkbox glued to the start of the label. */
+  flex-shrink: 0;
+}
+
+.checkbox-line > span {
+  /* Some checkbox-line variants wrap their visible text in a span so
+     the input + span sit side-by-side. Keep them on one line. */
+  display: inline-flex;
+  align-items: center;
 }
 
 .tax-controls .tax-rate-field {
@@ -1053,18 +1266,12 @@ input.part-category-button.add-category-input:focus {
   border-color: #d1d5db;
 }
 
+/* v0.1.16: row-level tints are handled via td background rules further
+   below. The previous strikethrough on every cell of a delivered row
+   was too noisy alongside the new colored backgrounds, so it's removed
+   here. The legacy color is kept as a subtle muted ink. */
 tr.job-delivered {
-  color: #6b7280;
-  background: #f8fafc;
-}
-
-tr.job-delivered td {
-  text-decoration: line-through;
-  text-decoration-color: rgba(0, 0, 0, 0.2);
-}
-
-tr.job-delivered .row-actions {
-  text-decoration: none;
+  color: #4b5563;
 }
 
 .row-action.success-action {
@@ -2218,4 +2425,1304 @@ tr.delivery-today td:nth-child(2),
 tr.delivery-today td:nth-child(3) {
   color: var(--accent-strong);
   font-weight: 600;
+}
+
+/* ======================================================================
+   v0.1.16 — Workshop Dashboard component layer.
+   Additive only: every rule above this point still works. Rules here
+   refine the existing components and introduce the new dashboard
+   surface (#todayView).
+   ====================================================================== */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --------- Buttons & inputs polish --------- */
+
+.primary-button {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: var(--radius);
+  font-weight: 700;
+  font-size: var(--text-small);
+  letter-spacing: 0.01em;
+  padding: 0 var(--space-4);
+  min-height: 40px;
+  transition: background var(--duration-fast) var(--ease),
+              transform var(--duration-fast) var(--ease);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+}
+
+.primary-button:hover {
+  background: var(--accent-strong);
+}
+
+.primary-button:active {
+  transform: translateY(1px);
+}
+
+.secondary-button,
+.row-action {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: var(--text-small);
+  border-radius: var(--radius);
+  padding: 0 var(--space-3);
+  min-height: 36px;
+  transition: background var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+
+.secondary-button:hover,
+.row-action:hover {
+  background: var(--panel-soft);
+  border-color: var(--line-strong);
+}
+
+.row-action.success-action {
+  background: var(--success);
+  border-color: var(--success);
+  color: #fff;
+}
+.row-action.success-action:hover {
+  filter: brightness(0.94);
+}
+
+.row-action.danger-action {
+  background: var(--panel);
+  border-color: var(--line);
+  color: var(--danger);
+}
+.row-action.danger-action:hover {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+input,
+select,
+textarea {
+  border-radius: var(--radius);
+  padding: 10px var(--space-3);
+  font-size: var(--text-base);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  transition: border-color var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
+}
+
+/* --------- Top-of-view "analytics-band" KPI strip refresh --------- */
+
+.analytics-band {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3);
+  margin-bottom: var(--space-4);
+  gap: var(--space-3);
+}
+
+.range-switch {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px;
+  gap: 2px;
+}
+
+.range-switch > .range-button {
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small);
+  font-weight: 600;
+  min-height: 32px;
+  padding: 0 var(--space-3);
+  color: var(--muted);
+}
+
+.range-switch > .range-button.active {
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: var(--shadow-sm);
+}
+
+.range-date,
+.range-month {
+  background: var(--panel);
+  border-radius: var(--radius);
+  font-size: var(--text-small);
+}
+
+.metric {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-4);
+}
+
+.metric span {
+  color: var(--muted);
+  font-size: var(--text-small);
+  font-weight: 600;
+}
+
+.metric strong {
+  font-size: var(--text-2xl);
+  font-weight: 900;
+  letter-spacing: -0.015em;
+  margin-top: var(--space-1);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.metric.profit strong {
+  color: var(--accent-strong);
+}
+
+.toolbar {
+  margin-bottom: var(--space-4);
+}
+
+/* --------- Dashboard (#todayView) --------- */
+
+#todayView {
+  display: none;
+}
+#todayView.active {
+  display: block;
+  animation: dashFadeIn var(--duration-slow) var(--ease-out);
+}
+
+@keyframes dashFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dash-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  position: relative;
+}
+
+.kpi-tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  position: relative;
+  overflow: hidden;
+}
+
+.kpi-tile-revenue {
+  background:
+    linear-gradient(135deg, var(--accent-soft) 0%, transparent 65%),
+    var(--panel);
+  border-color: var(--accent);
+}
+
+.kpi-tile-revenue::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(255, 200, 130, 0.25) 45%,
+    transparent 65%
+  );
+  transform: translateX(-110%);
+  animation: kpiSweep 1.4s var(--ease-out) 200ms 1 forwards;
+  pointer-events: none;
+}
+
+@keyframes kpiSweep {
+  to { transform: translateX(110%); }
+}
+
+.kpi-label {
+  display: block;
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: var(--space-2);
+}
+
+.kpi-value {
+  display: block;
+  font-size: var(--text-2xl);
+  font-weight: 900;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.kpi-tile-revenue .kpi-value {
+  color: var(--accent-strong);
+}
+
+.kpi-value-count {
+  font-size: var(--text-display);
+  line-height: 0.95;
+}
+
+.kpi-sub {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--text-micro);
+  color: var(--muted);
+}
+
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+
+.dash-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  animation: dashCardIn var(--duration-slow) var(--ease-out) backwards;
+}
+.dash-card:nth-child(1) { animation-delay: 60ms; }
+.dash-card:nth-child(2) { animation-delay: 120ms; }
+.dash-card:nth-child(3) { animation-delay: 180ms; }
+.dash-card:nth-child(4) { animation-delay: 240ms; }
+
+@keyframes dashCardIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.dash-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.dash-card-head h3 {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.dash-card-link {
+  background: transparent;
+  border: none;
+  color: var(--accent-strong);
+  font-size: var(--text-small);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease);
+}
+.dash-card-link:hover {
+  background: var(--accent-soft);
+}
+
+.dash-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dash-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  align-items: center;
+  border-bottom: 1px dashed var(--line);
+}
+.dash-row:last-child {
+  border-bottom: none;
+}
+
+.dash-row-time {
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--ink-2);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  white-space: nowrap;
+}
+
+.dash-row-main {
+  min-width: 0;
+}
+
+.dash-row-title {
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-row-sub {
+  font-size: var(--text-small);
+  color: var(--muted);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-empty {
+  padding: var(--space-4) 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--text-small);
+}
+
+.dash-quick-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.dash-quick-actions .primary-button,
+.dash-quick-actions .secondary-button {
+  min-height: 44px;
+  padding: 0 var(--space-5);
+  font-size: var(--text-base);
+}
+
+/* --------- Tables polish --------- */
+
+.data-table {
+  font-size: var(--text-small);
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-soft);
+  font-weight: 700;
+  color: var(--ink-2);
+  font-size: var(--text-micro);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--line-strong);
+  padding: var(--space-3) var(--space-3);
+  z-index: 1;
+}
+
+.data-table tbody td {
+  border-bottom: 1px solid var(--line);
+  padding: var(--space-3) var(--space-3);
+  vertical-align: middle;
+}
+
+.data-table tbody tr {
+  transition: background var(--duration-fast) var(--ease);
+}
+.data-table tbody tr:hover {
+  background: var(--panel-soft);
+}
+
+.data-table tbody tr.selected {
+  background: var(--accent-soft);
+}
+
+.data-table .row-actions {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.data-table .row-action {
+  min-height: 30px;
+  padding: 0 var(--space-2);
+  font-size: var(--text-micro);
+}
+
+/* --------- Modal polish --------- */
+
+.modal-backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+  border-bottom: 1px solid var(--line);
+}
+
+.modal-header h2 {
+  font-weight: 800;
+  font-size: var(--text-xl);
+  letter-spacing: -0.015em;
+}
+
+.icon-button {
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  transition: background var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease);
+}
+.icon-button:hover {
+  background: var(--panel-soft);
+  color: var(--ink);
+  border-color: var(--line);
+}
+
+/* --------- Reduced motion --------- */
+@media (prefers-reduced-motion: reduce) {
+  .kpi-tile-revenue::before,
+  #todayView.active,
+  .dash-card {
+    animation: none !important;
+  }
+}
+
+/* ======================================================================
+   v0.1.16 phase B — modal tabs, mode toggle, form sections, parts grid,
+   data-table row redesign with expand + kebab actions.
+   ====================================================================== */
+
+/* --- Wider modal for the job form (it now houses tabbed content) --- */
+.modal.modal-wide {
+  max-width: 920px;
+  width: min(92vw, 920px);
+  /* The tabbed modal has its own sections with their own padding; the
+     ambient 18px from .modal would double up and waste space. */
+  padding: 0;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+}
+
+.modal-header h2 {
+  margin-inline-end: auto;
+}
+
+/* --- Mode toggle (עבודה / הצעת מחיר) in the modal header --- */
+.job-mode-toggle {
+  display: inline-flex;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  gap: 2px;
+}
+
+.job-mode-option {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-small);
+  font-weight: 700;
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-pill);
+  transition: background var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease);
+}
+
+.job-mode-option.active {
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: var(--shadow-sm);
+}
+
+.job-mode-option[data-job-mode="quote"].active {
+  background: var(--quote-soft);
+  color: var(--quote);
+}
+
+/* Quote mode tints the modal subtly so the user always knows they're
+   building an estimate, not a job. */
+#jobModal.is-quote-mode .modal {
+  border-top: 3px solid var(--quote);
+}
+
+/* --- Modal tabs nav --- */
+.modal-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 var(--space-5);
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.modal-tab {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: transparent;
+  border: none;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+
+.modal-tab:hover {
+  color: var(--ink);
+}
+
+.modal-tab.active {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
+  background: var(--panel);
+}
+
+.modal-tab-num {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: var(--text-micro);
+  font-weight: 800;
+  color: var(--muted);
+  transition: background var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease);
+}
+
+.modal-tab.active .modal-tab-num {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* --- Modal pane (tab content area) --- */
+.modal-pane {
+  padding: var(--space-5);
+  flex: 1 1 auto;
+  overflow-y: auto;
+  /* Removed max-height — flex-1 lets the pane fill all available space
+     between the (non-scrolling) header/tabs and (non-scrolling) actions
+     so only one scroll container exists. */
+}
+
+/* All "chrome" sections inside the modal should never shrink. */
+.modal > .modal-header,
+.modal > .modal-tabs,
+.modal > .modal-actions {
+  flex-shrink: 0;
+}
+
+.modal-pane[hidden] {
+  display: none !important;
+}
+
+.modal-pane.active {
+  animation: panefadein var(--duration) var(--ease-out);
+}
+
+@keyframes panefadein {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Form sections (grouped within a tab) --- */
+.form-section {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-4);
+}
+
+.form-section:last-child {
+  margin-bottom: 0;
+}
+
+.form-section-head {
+  margin-bottom: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px dashed var(--line);
+}
+
+.form-section-head h3 {
+  font-size: var(--text-lg);
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.form-section-head .form-section-hint {
+  margin-top: 4px;
+  font-size: var(--text-small);
+  color: var(--muted);
+}
+
+/* Inside a form-section the form-grid should breathe a bit */
+.form-section .form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.form-section label {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink-2);
+  display: grid;
+  gap: 4px;
+}
+
+.form-section label > span {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.form-section input[type="text"],
+.form-section input[type="number"],
+.form-section input[type="tel"],
+.form-section input[type="date"],
+.form-section input[type="email"],
+.form-section input[type="search"],
+.form-section select,
+.form-section textarea {
+  background: var(--panel);
+}
+
+/* --- Polished parts picker grid --- */
+.part-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.part-card {
+  display: grid;
+  gap: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease),
+              transform var(--duration-fast) var(--ease),
+              box-shadow var(--duration-fast) var(--ease);
+  position: relative;
+}
+
+.part-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.part-card.is-selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.part-card.is-disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  background: var(--panel-soft);
+}
+
+.part-card-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.part-card-topline strong {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.part-card-topline > span {
+  font-size: var(--text-micro);
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.part-card-meta {
+  font-size: var(--text-micro);
+  color: var(--muted);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.part-card-values {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.part-card-values .stock-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+}
+
+.part-card-warning {
+  font-size: var(--text-micro);
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-weight: 600;
+}
+
+.part-card-add {
+  margin-top: var(--space-1);
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  font-weight: 700;
+  font-size: var(--text-small);
+  transition: background var(--duration-fast) var(--ease);
+}
+.part-card-add:hover {
+  background: var(--accent-strong);
+}
+
+.part-category-tabs {
+  display: flex;
+  gap: 4px;
+  margin: var(--space-3) 0;
+  flex-wrap: wrap;
+}
+
+.part-category-tabs button {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  font-size: var(--text-micro);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.part-category-tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* --- Selected parts list --- */
+.selected-parts {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.selected-part-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+/* --- Totals strip cleanup --- */
+.totals-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  font-size: var(--text-small);
+  color: var(--ink-2);
+}
+
+.totals-strip strong {
+  color: var(--ink);
+  font-weight: 800;
+  margin-inline-start: 4px;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.totals-strip .grand-total {
+  margin-inline-start: auto;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.totals-strip .grand-total strong {
+  font-size: var(--text-lg);
+  color: var(--accent-strong);
+}
+
+.totals-strip .profit-pill {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  color: var(--accent-strong);
+}
+
+.totals-strip .profit-pill strong {
+  color: var(--accent-strong);
+}
+
+/* --- Modal actions row --- */
+.modal-actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  border-top: 1px solid var(--line);
+  background: var(--panel-soft);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.modal-actions .primary-button {
+  margin-inline-start: auto;
+}
+
+/* --- Notes textarea --- */
+.notes-textarea-label textarea {
+  resize: vertical;
+  min-height: 96px;
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.55;
+}
+
+/* ======================================================================
+   Jobs / Appointments table redesign — fewer visible columns + expandable
+   detail row + kebab menu for non-primary actions.
+   ====================================================================== */
+
+/* Row-detail rows (hidden by default, toggled via .expanded) */
+tr.row-detail {
+  background: var(--panel-soft);
+}
+tr.row-detail.is-hidden {
+  display: none;
+}
+tr.row-detail > td {
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3) var(--space-4);
+}
+
+.detail-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.detail-grid span {
+  font-size: var(--text-micro);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: none;
+}
+
+.detail-grid strong {
+  font-size: var(--text-small);
+  font-weight: 700;
+  color: var(--ink);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.detail-notes-block {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--line);
+  font-size: var(--text-small);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+
+.row-expand {
+  background: transparent;
+  border: 1px solid var(--line);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  transition: background var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease),
+              transform var(--duration-fast) var(--ease);
+}
+.row-expand:hover {
+  background: var(--panel-soft);
+  color: var(--ink);
+}
+.row-expand[aria-expanded="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  transform: rotate(180deg);
+}
+
+/* Kebab menu for non-primary row actions (uses <details>/<summary>) */
+.row-kebab {
+  position: relative;
+  display: inline-block;
+}
+
+.row-kebab summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 700;
+  user-select: none;
+  transition: background var(--duration-fast) var(--ease);
+}
+
+.row-kebab summary::-webkit-details-marker {
+  display: none;
+}
+
+.row-kebab summary:hover {
+  background: var(--panel-soft);
+  color: var(--ink);
+}
+
+.row-kebab[open] summary {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border-color: var(--accent);
+}
+
+.row-kebab-menu {
+  /* position:fixed with JS-set coords means the menu lives outside the
+     table's layout entirely — it cannot push the page wider or trigger a
+     horizontal scrollbar regardless of which column it's in. */
+  position: fixed;
+  min-width: 180px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+}
+
+.row-kebab-menu button {
+  text-align: start;
+  background: transparent;
+  border: none;
+  padding: 8px 12px;
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease);
+}
+.row-kebab-menu button:hover {
+  background: var(--panel-soft);
+}
+.row-kebab-menu button.danger {
+  color: var(--danger);
+}
+.row-kebab-menu button.danger:hover {
+  background: var(--danger-soft);
+}
+
+/* Two-line table cells: title + sub */
+.cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cell-stack-sub {
+  font-size: var(--text-micro);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Status pill in the table */
+.status-pill-table {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-micro);
+  font-weight: 700;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.status-pill-table.is-open       { color: var(--ink-2); background: var(--panel-soft); }
+.status-pill-table.is-delivered  { color: var(--success); background: var(--success-soft); border-color: var(--success); }
+.status-pill-table.is-quote      { color: var(--quote); background: var(--quote-soft); border-color: var(--quote); }
+.status-pill-table.is-rejected   { color: var(--danger); background: var(--danger-soft); border-color: var(--danger); }
+
+/* Back button (vehicle history sub-view) */
+.back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: var(--text-small);
+  font-weight: 600;
+  border-radius: var(--radius);
+  padding: 8px var(--space-3);
+  margin-bottom: var(--space-4);
+  transition: background var(--duration-fast) var(--ease),
+              border-color var(--duration-fast) var(--ease);
+}
+.back-button:hover {
+  background: var(--panel-soft);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+.back-button span[aria-hidden] {
+  font-size: 16px;
+  color: var(--accent);
+}
+
+/* Note: row-kebab-menu uses position: fixed with JS-set top/left so the
+   ".opens-up" class is no longer needed — JS picks the correct edge. */
+
+/* --- Row tints by status ---
+   Subtle background tints so the user can see at a glance which rows
+   are delivered / quotes / rejected / no-show without reading the
+   status pill. The tint is intentionally very gentle so it doesn't
+   overpower the text. */
+
+/* Tints are flat oklch colors (not gradients) so they paint solidly over
+   any inherited background. Alpha bumped to ~0.85 so the green / purple /
+   red is clearly visible at a glance even when row hover lightens it. */
+.data-table tbody tr.job-delivered td {
+  background: oklch(94% 0.04 145);
+}
+.data-table tbody tr.job-delivered:hover td {
+  background: oklch(92% 0.05 145);
+}
+
+.data-table tbody tr.job-quote td {
+  background: oklch(95% 0.035 290);
+}
+.data-table tbody tr.job-quote:hover td {
+  background: oklch(93% 0.05 290);
+}
+
+.data-table tbody tr.job-rejected td {
+  background: oklch(94% 0.03 25);
+  color: var(--muted);
+}
+.data-table tbody tr.job-rejected:hover td {
+  background: oklch(92% 0.04 25);
+}
+.data-table tbody tr.job-rejected td.parts-cell {
+  text-decoration: line-through;
+  text-decoration-color: rgba(0, 0, 0, 0.25);
+}
+
+.data-table tbody tr.appointment-arrived td {
+  background: oklch(94% 0.04 145);
+}
+.data-table tbody tr.appointment-arrived:hover td {
+  background: oklch(92% 0.05 145);
+}
+.data-table tbody tr.appointment-noshow td {
+  background: oklch(94% 0.03 25);
+  color: var(--muted);
+}
+.data-table tbody tr.appointment-noshow:hover td {
+  background: oklch(92% 0.04 25);
+}
+
+/* Detail rows should match the parent row's tint so the colored block
+   reads as one continuous status zone. */
+.data-table tbody tr.row-detail + tr,
+.data-table tbody tr.row-detail {
+  /* default — tint is inherited from the immediately preceding row by
+     the explicit rules below */
+}
+/* When the parent row is delivered/quote/rejected, the next sibling
+   (detail row) should keep the same tint */
+tr.job-delivered + tr.row-detail td   { background: oklch(96% 0.025 145 / 0.25); }
+tr.job-quote + tr.row-detail td       { background: oklch(96% 0.025 290 / 0.25); }
+tr.job-rejected + tr.row-detail td    { background: oklch(96% 0.025 25 / 0.22); }
+tr.appointment-arrived + tr.row-detail td { background: oklch(96% 0.025 145 / 0.25); }
+tr.appointment-noshow + tr.row-detail td  { background: oklch(96% 0.025 25 / 0.22); }
+
+/* Plate link compact mode for table cells. Cells use cell-stack so the
+   plate sits inside, and a long plate with letter-spacing was overflowing.
+   Tighter letter-spacing + smaller padding keeps it scannable. */
+.cell-stack .plate-link {
+  padding: 1px 6px;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+}
+
+.cell-stack .plate-link {
+  align-self: flex-start;
+}
+
+/* Stretched cells in the compact table sometimes shrink the plate cell —
+   nowrap on the plate stops the chars from wrapping mid-plate. */
+td .plate-link {
+  white-space: nowrap;
+}
+
+/* Tiny prompt (used instead of window.prompt for new category) */
+.tiny-prompt-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  animation: panefadein var(--duration) var(--ease-out);
+}
+
+.tiny-prompt {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+  width: min(420px, 92vw);
+  display: grid;
+  gap: var(--space-3);
+}
+
+.tiny-prompt h3 {
+  font-size: var(--text-lg);
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.tiny-prompt label {
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.tiny-prompt-input {
+  font-size: var(--text-base);
+  padding: 10px var(--space-3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.tiny-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
+/* Better empty states */
+.empty-state {
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+}
+.empty-state-icon {
+  font-size: 32px;
+  opacity: 0.55;
+}
+.empty-state-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.empty-state-text {
+  font-size: var(--text-small);
+  color: var(--muted);
+  max-width: 360px;
+  line-height: 1.5;
+}
+.empty-state-cta {
+  margin-top: var(--space-2);
 }
