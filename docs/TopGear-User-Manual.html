@@ -1,67 +1,4 @@
-"""
-TopGear — Hebrew user manual PDF generator (HTML → headless Edge).
-
-Run:
-    python scripts/build_user_manual.py
-
-Writes both:
-    docs/TopGear-User-Manual.html  (source — easy to tweak)
-    docs/TopGear-User-Manual.pdf   (final PDF rendered by Edge)
-
-Why HTML + browser instead of ReportLab
----------------------------------------
-ReportLab's text engine does not implement the Unicode Bidirectional
-Algorithm. Hebrew rendering required python-bidi pre-passes, but the
-pre-pass reverses each *source line* before ReportLab decides where
-visual lines wrap — so wrapped paragraphs come out scrambled. Native
-`wordWrap='RTL'` only handles paragraph direction, not character
-order within a line. Result: inverted text.
-
-A headless Chromium-based browser (Edge or Chrome) renders Hebrew
-exactly like the web app does — the same Unicode Bidi Algorithm,
-the same fonts, the same RTL flow we already use for invoices. The
-output PDF matches what a user would see if they printed an HTML
-page in their normal browser.
-
-Requires Microsoft Edge or Google Chrome installed on Windows.
-"""
-
-import subprocess
-from pathlib import Path
-import shutil
-
-HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
-OUT_HTML = ROOT / "docs" / "TopGear-User-Manual.html"
-OUT_PDF = ROOT / "docs" / "TopGear-User-Manual.pdf"
-LOGO_REL = "../assets/topgear.png"  # relative to docs/
-OUT_HTML.parent.mkdir(parents=True, exist_ok=True)
-
-
-def find_browser() -> str:
-    """Locate a Chromium-based browser that supports --headless --print-to-pdf."""
-    candidates = [
-        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-    ]
-    for path in candidates:
-        if Path(path).exists():
-            return path
-    # PATH fallback
-    for name in ("msedge", "chrome", "google-chrome"):
-        path = shutil.which(name)
-        if path:
-            return path
-    raise RuntimeError("No Edge/Chrome found for headless PDF rendering.")
-
-
-# ----------------------------------------------------------------------
-# Manual content as a single HTML document. The print CSS handles page
-# breaks and the brass header strip on every page.
-# ----------------------------------------------------------------------
-HTML = r"""<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
 <meta charset="utf-8">
@@ -235,7 +172,7 @@ HTML = r"""<!DOCTYPE html>
 
 <!-- COVER -->
 <section class="cover">
-  <img class="cover-logo" src="LOGO_PLACEHOLDER" alt="TopGear">
+  <img class="cover-logo" src="../assets/topgear.png" alt="TopGear">
   <h1 class="cover-wordmark">TopGear</h1>
   <div class="cover-tag">מערכת ניהול מוסך</div>
   <div class="cover-band">מדריך למשתמש</div>
@@ -472,30 +409,3 @@ HTML = r"""<!DOCTYPE html>
 
 </body>
 </html>
-"""
-
-# Inline the logo path
-html_out = HTML.replace("LOGO_PLACEHOLDER", LOGO_REL)
-OUT_HTML.write_text(html_out, encoding="utf-8")
-print(f"Wrote {OUT_HTML} ({OUT_HTML.stat().st_size / 1024:.1f} KB)")
-
-# Render to PDF via headless browser
-browser = find_browser()
-print(f"Rendering with: {browser}")
-
-cmd = [
-    browser,
-    "--headless=new",
-    "--disable-gpu",
-    "--no-pdf-header-footer",
-    "--print-to-pdf-no-header",
-    f"--print-to-pdf={OUT_PDF}",
-    OUT_HTML.as_uri(),
-]
-result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-if result.returncode != 0:
-    print("STDERR:", result.stderr[:500])
-    print("STDOUT:", result.stdout[:500])
-    raise SystemExit(f"Browser exited {result.returncode}")
-
-print(f"Wrote {OUT_PDF} ({OUT_PDF.stat().st_size / 1024:.1f} KB)")

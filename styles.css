@@ -337,12 +337,79 @@ button {
 
 .topbar {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   margin-bottom: var(--space-5);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--line);
+}
+
+/* Prominent TopGear branding on the visual right (RTL natural start). */
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Brass accent ribbon along the inside edge of the brand block — the
+   same visual cue as the active-nav stripe so the brand block feels
+   "lit up" without being loud. */
+.topbar-brand::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 12%;
+  bottom: 12%;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.topbar-logo {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius);
+  object-fit: contain;
+  flex-shrink: 0;
+  background: var(--panel-soft);
+  padding: 2px;
+}
+
+.topbar-titles {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+
+.topbar-brand-name {
+  font-size: var(--text-xl);
+  font-weight: 900;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+}
+
+.topbar-brand-tag {
+  font-size: var(--text-micro);
+  font-weight: 600;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.topbar-screen {
+  flex: 1;
+  min-width: 0;
+}
+
+.topbar-screen h1 {
+  margin: 0;
 }
 
 h1,
