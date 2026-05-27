@@ -1,7 +1,7 @@
 "use strict";
 
 const DB_NAME = "topgear_offline_garage";
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 const PART_CATEGORIES = [
   { id: "all", label: "הכל" },
@@ -15,6 +15,27 @@ const PART_CATEGORIES = [
   { id: "general", label: "כללי" }
 ];
 const NEW_CATEGORY_OPTION = "__add_new_category__";
+
+// Business expense categories (הוצאות). Fixed list — covers the common
+// outgoings of a small Israeli garage. "אחר" is the catch-all.
+const EXPENSE_CATEGORIES = [
+  { id: "rent", label: "שכירות" },
+  { id: "tools", label: "כלי עבודה וציוד" },
+  { id: "supplies", label: "חומרים וחלקים" },
+  { id: "utilities", label: "חשמל, מים וארנונה" },
+  { id: "food", label: "אוכל וכיבוד" },
+  { id: "fuel", label: "דלק ורכב" },
+  { id: "salary", label: "משכורות" },
+  { id: "insurance", label: "ביטוח" },
+  { id: "marketing", label: "שיווק ופרסום" },
+  { id: "tax", label: "מסים ואגרות" },
+  { id: "other", label: "אחר" }
+];
+
+function getExpenseCategoryLabel(id) {
+  const found = EXPENSE_CATEGORIES.find((c) => c.id === id);
+  return found ? found.label : "אחר";
+}
 
 const DEFAULT_BUSINESS = {
   id: "business",
@@ -32,6 +53,7 @@ const state = {
   inventory: [],
   customCategories: [],
   appointments: [],
+  expenses: [],
   business: { ...DEFAULT_BUSINESS },
   whatsappSource: "job",
   whatsappSelectedId: null,
@@ -57,6 +79,10 @@ const state = {
   activeDeliveryRange: "all",
   // Appointments page has a "today" tab — date filter defaults to it.
   activeAppointmentRange: "today",
+  // Expenses page date range (היום/השבוע/החודש/הכל). Defaults to "month"
+  // because expenses are usually reviewed per-month (rent, salaries...).
+  activeExpenseRange: "month",
+  editingExpenseId: null,
   activePartCategory: "all",
   activeInventoryCategory: "all",
   selectedPartId: null,
@@ -219,6 +245,7 @@ function cacheElements() {
     inventory: document.querySelector("#inventoryView"),
     deliveries: document.querySelector("#deliveriesView"),
     appointments: document.querySelector("#appointmentsView"),
+    expenses: document.querySelector("#expensesView"),
     whatsapp: document.querySelector("#whatsappView"),
     vehicleHistory: document.querySelector("#vehicleHistoryView"),
     backup: document.querySelector("#backupView")
@@ -273,6 +300,22 @@ function cacheElements() {
   els.appointmentModalTitle = document.querySelector("#appointmentModalTitle");
   els.appointmentError = document.querySelector("#appointmentError");
 
+  // Expenses page
+  els.expenseSearch = document.querySelector("#expenseSearch");
+  els.expensesBody = document.querySelector("#expensesBody");
+  els.expensesEmpty = document.querySelector("#expensesEmpty");
+  els.expenseBreakdown = document.querySelector("#expenseBreakdown");
+  els.expenseRangeButtons = Array.from(document.querySelectorAll("[data-expense-range]"));
+  els.expenseProfitMetric = document.querySelector("#expenseProfitMetric");
+  els.expenseTotalMetric = document.querySelector("#expenseTotalMetric");
+  els.expenseNetMetric = document.querySelector("#expenseNetMetric");
+  els.addExpenseButton = document.querySelector("#addExpenseButton");
+  els.expenseModal = document.querySelector("#expenseModal");
+  els.expenseForm = document.querySelector("#expenseForm");
+  els.expenseModalTitle = document.querySelector("#expenseModalTitle");
+  els.expenseCategorySelect = document.querySelector("#expenseCategorySelect");
+  els.expenseError = document.querySelector("#expenseError");
+
   els.jobModal = document.querySelector("#jobModal");
   els.jobForm = document.querySelector("#jobForm");
   els.jobModalTitle = document.querySelector("#jobModalTitle");
@@ -319,6 +362,7 @@ function cacheElements() {
   els.exportJsonButton = document.querySelector("#exportJsonButton");
   els.exportJobsCsvButton = document.querySelector("#exportJobsCsvButton");
   els.exportInventoryCsvButton = document.querySelector("#exportInventoryCsvButton");
+  els.exportExpensesCsvButton = document.querySelector("#exportExpensesCsvButton");
   els.importJsonInput = document.querySelector("#importJsonInput");
   els.businessSettingsForm = document.querySelector("#businessSettingsForm");
   els.whatsappSourceTabs = Array.from(document.querySelectorAll("[data-wa-source]"));
@@ -434,6 +478,24 @@ function bindEvents() {
   els.addAppointmentButton.addEventListener("click", () => openAppointmentModal());
   els.appointmentForm.addEventListener("submit", saveAppointmentFromForm);
 
+  // Expenses page wiring
+  if (els.expenseSearch) {
+    els.expenseSearch.addEventListener("input", renderExpenses);
+  }
+  els.expenseRangeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.activeExpenseRange = button.dataset.expenseRange;
+      els.expenseRangeButtons.forEach((item) => item.classList.toggle("active", item === button));
+      renderExpenses();
+    });
+  });
+  if (els.addExpenseButton) {
+    els.addExpenseButton.addEventListener("click", () => openExpenseModal());
+  }
+  if (els.expenseForm) {
+    els.expenseForm.addEventListener("submit", saveExpenseFromForm);
+  }
+
   els.jobForm.elements.vehiclePlate.addEventListener("blur", (event) => {
     autofillVehicleFields(event.target, els.jobForm, { fillModel: true, fillYear: true, fillEngine: true });
   });
@@ -461,6 +523,7 @@ function bindEvents() {
       if (what === "job") openJobModal();
       else if (what === "part") openPartModal();
       else if (what === "appointment") openAppointmentModal();
+      else if (what === "expense") openExpenseModal();
     });
   });
   // <details> doesn't auto-close on outside-click OR on inside-menu-item-
@@ -630,6 +693,9 @@ function bindEvents() {
   els.exportJsonButton.addEventListener("click", exportJson);
   els.exportJobsCsvButton.addEventListener("click", exportJobsCsv);
   els.exportInventoryCsvButton.addEventListener("click", exportInventoryCsv);
+  if (els.exportExpensesCsvButton) {
+    els.exportExpensesCsvButton.addEventListener("click", exportExpensesCsv);
+  }
   els.importJsonInput.addEventListener("change", importJson);
   els.businessSettingsForm.addEventListener("submit", saveBusinessFromForm);
   els.invoicePrintButton.addEventListener("click", printInvoiceWithFilename);
@@ -761,6 +827,15 @@ function openDatabase() {
       if (!db.objectStoreNames.contains("settings")) {
         db.createObjectStore("settings", { keyPath: "id" });
       }
+
+      // v5: business expenses (rent, tools, food, ...). Additive store —
+      // existing data in all other stores is untouched, so upgrading from
+      // v4 preserves every job, part, appointment and setting.
+      if (!db.objectStoreNames.contains("expenses")) {
+        const expenses = db.createObjectStore("expenses", { keyPath: "id", autoIncrement: true });
+        expenses.createIndex("date", "date", { unique: false });
+        expenses.createIndex("category", "category", { unique: false });
+      }
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -790,12 +865,13 @@ async function getAll(storeName) {
 }
 
 async function refreshData() {
-  const [jobs, inventory, categories, appointments, settings] = await Promise.all([
+  const [jobs, inventory, categories, appointments, settings, expenses] = await Promise.all([
     getAll("jobs"),
     getAll("inventory"),
     getAll("categories"),
     getAll("appointments"),
-    getAll("settings")
+    getAll("settings"),
+    getAll("expenses")
   ]);
   state.jobs = jobs.sort((a, b) => `${b.jobDate}${b.id}`.localeCompare(`${a.jobDate}${a.id}`));
   state.inventory = inventory.sort((a, b) => a.name.localeCompare(b.name, "he"));
@@ -805,6 +881,8 @@ async function refreshData() {
     const bKey = `${b.appointmentDate || ""}${b.appointmentTime || ""}`;
     return aKey.localeCompare(bKey);
   });
+  // Newest expense first.
+  state.expenses = expenses.sort((a, b) => `${b.date}${b.id}`.localeCompare(`${a.date}${a.id}`));
   const businessRecord = settings.find((s) => s.id === "business");
   state.business = businessRecord ? { ...DEFAULT_BUSINESS, ...businessRecord } : { ...DEFAULT_BUSINESS };
 }
@@ -829,6 +907,7 @@ function renderAll() {
   renderWhatsappSourceList();
   renderVehicleHistory();
   renderTodayView();
+  renderExpenses();
 }
 
 function normalizePlate(plate) {
@@ -1144,6 +1223,7 @@ function switchView(view) {
     inventory: ["ניהול מלאי חלקים", "קטלוג חלקים מקומי עם כמויות ומחירים"],
     deliveries: ["מסירות צפויות", "עבודות לפי תאריך מסירה עם סטטוס ואיחורים"],
     appointments: ["תורים ופגישות", "תיאום הגעות עם פרטי לקוח, רכב וסיבת ההגעה"],
+    expenses: ["הוצאות", "מעקב הוצאות העסק מול ההכנסות — שכירות, כלי עבודה, חשמל ועוד"],
     whatsapp: ["שליחה ללקוח", "שליחת הודעות WhatsApp ללקוחות מתוך עבודות ותורים"],
     vehicleHistory: ["היסטוריית רכב", "כל הביקורים של רכב לפי מספר רישוי"],
     backup: ["הגדרות", "פרטי העסק לחשבוניות, גיבוי וייצוא נתונים, וייבוא מקובץ גיבוי"]
@@ -2129,6 +2209,212 @@ async function restoreAppointmentFromNoShow(appointmentId) {
   await refreshData();
   renderAll();
   showToast(`התור של ${existing.customerName} הוחזר לסטטוס "צפוי"`);
+}
+
+/* ======================================================================
+   EXPENSES (הוצאות)
+   Independent date range (state.activeExpenseRange) so the user can
+   review spending per day / week / month / all without touching the
+   jobs banner range. Revenue shown for context uses the SAME eligibility
+   as the rest of the app: delivered, non-quote jobs, gross (with VAT).
+   ====================================================================== */
+
+// Self-contained date range for the expenses page — does NOT read
+// state.specificRangeMonth/Date (those belong to the jobs banner), so
+// the two pages never interfere.
+function getExpenseDateRange(range) {
+  const today = new Date();
+  const start = new Date(today);
+  const end = new Date(today);
+  start.setHours(0, 0, 0, 0);
+  end.setHours(23, 59, 59, 999);
+  if (range === "week") {
+    start.setDate(today.getDate() - today.getDay()); // Sunday-of-this-week
+  } else if (range === "month") {
+    start.setDate(1); // first of current month
+  } else if (range === "all") {
+    return { start: null, end: null };
+  }
+  return { start, end };
+}
+
+function renderExpenseCategorySelect() {
+  if (!els.expenseCategorySelect) return;
+  els.expenseCategorySelect.innerHTML = EXPENSE_CATEGORIES
+    .map((c) => `<option value="${c.id}">${escapeHtml(c.label)}</option>`)
+    .join("");
+}
+
+function renderExpenses() {
+  if (!els.expensesBody) return;
+  const range = state.activeExpenseRange || "month";
+  const { start, end } = getExpenseDateRange(range);
+  const query = normalizeSearch(els.expenseSearch ? els.expenseSearch.value : "");
+
+  // Expenses in the selected window, matching the search box.
+  const rows = state.expenses.filter((e) => {
+    if (!isDateInRange(e.date, start, end)) return false;
+    const haystack = normalizeSearch([
+      getExpenseCategoryLabel(e.category),
+      e.description
+    ].join(" "));
+    return haystack.includes(query);
+  });
+
+  // --- Summary band ---
+  // Business expenses are deducted from PROFIT, not revenue. Revenue is just
+  // money coming in (and includes VAT, which the garage only collects on the
+  // government's behalf). The money the garage actually keeps from a job is the
+  // profit (labor + parts markup, pre-VAT). So the bottom line shown here is
+  // profit − expenses. Profit is summed over delivered, non-quote jobs in the
+  // SAME window, mirroring renderAnalytics so the two pages agree.
+  const profit = state.jobs.reduce((sum, job) => {
+    if (job.isQuote || !job.deliveredAt) return sum;
+    if (!isDateInRange(job.jobDate, start, end)) return sum;
+    return sum + getJobTotals(job).profit;
+  }, 0);
+  const totalExpenses = rows.reduce((s, e) => s + Number(e.amount || 0), 0);
+  const net = profit - totalExpenses;
+
+  if (els.expenseProfitMetric) els.expenseProfitMetric.textContent = formatCurrency(profit);
+  if (els.expenseTotalMetric) els.expenseTotalMetric.textContent = formatCurrency(totalExpenses);
+  if (els.expenseNetMetric) {
+    els.expenseNetMetric.textContent = formatCurrency(net);
+    // Visually flag a loss (expenses > profit) in red.
+    els.expenseNetMetric.classList.toggle("metric-negative", net < 0);
+  }
+
+  // --- Table ---
+  els.expensesBody.innerHTML = "";
+  rows.forEach((expense) => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td><strong>${formatDate(expense.date)}</strong></td>
+      <td><span class="expense-cat-pill">${escapeHtml(getExpenseCategoryLabel(expense.category))}</span></td>
+      <td>${escapeHtml(expense.description || "—")}</td>
+      <td class="numeric"><strong>${formatCurrency(expense.amount)}</strong></td>
+      <td class="col-actions">
+        <span class="row-actions">
+          <button class="row-action" type="button" data-expense-edit="${expense.id}">עריכה</button>
+          <button class="row-action danger-action" type="button" data-expense-delete="${expense.id}">מחיקה</button>
+        </span>
+      </td>
+    `;
+    els.expensesBody.appendChild(row);
+  });
+
+  els.expensesBody.querySelectorAll("[data-expense-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => openExpenseModal(Number(btn.dataset.expenseEdit)));
+  });
+  els.expensesBody.querySelectorAll("[data-expense-delete]").forEach((btn) => {
+    btn.addEventListener("click", () => deleteExpense(Number(btn.dataset.expenseDelete)));
+  });
+
+  els.expensesEmpty.classList.toggle("hidden", rows.length > 0);
+
+  // --- Category breakdown (side panel) ---
+  if (els.expenseBreakdown) {
+    const byCategory = new Map();
+    for (const e of rows) {
+      byCategory.set(e.category, (byCategory.get(e.category) || 0) + Number(e.amount || 0));
+    }
+    const sorted = [...byCategory.entries()].sort((a, b) => b[1] - a[1]);
+    if (sorted.length === 0) {
+      els.expenseBreakdown.innerHTML = `
+        <h3 class="expense-breakdown-title">פירוט לפי קטגוריה</h3>
+        <div class="expense-breakdown-empty">אין הוצאות בטווח</div>`;
+    } else {
+      const maxVal = sorted[0][1] || 1;
+      els.expenseBreakdown.innerHTML = `
+        <h3 class="expense-breakdown-title">פירוט לפי קטגוריה</h3>
+        ${sorted.map(([cat, amount]) => {
+          const pct = totalExpenses > 0 ? Math.round((amount / totalExpenses) * 100) : 0;
+          const barWidth = Math.round((amount / maxVal) * 100);
+          return `
+            <div class="expense-breakdown-row">
+              <div class="expense-breakdown-head">
+                <span class="expense-breakdown-cat">${escapeHtml(getExpenseCategoryLabel(cat))}</span>
+                <span class="expense-breakdown-amount">${formatCurrency(amount)} · ${pct}%</span>
+              </div>
+              <div class="expense-breakdown-track"><div class="expense-breakdown-bar" style="width:${barWidth}%"></div></div>
+            </div>`;
+        }).join("")}`;
+    }
+  }
+}
+
+function openExpenseModal(expenseId = null) {
+  state.editingExpenseId = expenseId;
+  clearError(els.expenseError);
+  els.expenseForm.reset();
+  renderExpenseCategorySelect();
+
+  if (expenseId) {
+    const expense = state.expenses.find((e) => e.id === expenseId);
+    if (!expense) return;
+    els.expenseModalTitle.textContent = "עריכת הוצאה";
+    els.expenseForm.elements.date.value = expense.date || toIsoDate(new Date());
+    els.expenseForm.elements.category.value = expense.category || "other";
+    els.expenseForm.elements.description.value = expense.description || "";
+    els.expenseForm.elements.amount.value = String(expense.amount ?? "");
+  } else {
+    els.expenseModalTitle.textContent = "הוספת הוצאה";
+    els.expenseForm.elements.date.value = toIsoDate(new Date());
+    els.expenseForm.elements.category.value = "rent";
+  }
+
+  openModal("expenseModal");
+  requestAnimationFrame(() => els.expenseForm.elements.description.focus());
+}
+
+async function saveExpenseFromForm(event) {
+  event.preventDefault();
+  clearError(els.expenseError);
+  const form = new FormData(els.expenseForm);
+  const amount = Number(form.get("amount"));
+  if (!(amount > 0)) {
+    showError(els.expenseError, "יש להזין סכום גדול מאפס");
+    return;
+  }
+  const record = {
+    date: String(form.get("date") || toIsoDate(new Date())),
+    category: String(form.get("category") || "other"),
+    description: String(form.get("description") || "").trim(),
+    amount: Math.round(amount * 100) / 100,
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    const transaction = state.db.transaction("expenses", "readwrite");
+    const store = transaction.objectStore("expenses");
+    if (state.editingExpenseId) {
+      const existing = await idbRequest(store.get(state.editingExpenseId));
+      store.put({ ...existing, ...record, id: state.editingExpenseId });
+    } else {
+      store.add({ ...record, createdAt: new Date().toISOString() });
+    }
+    await transactionDone(transaction);
+    await refreshData();
+    renderAll();
+    closeModal("expenseModal");
+    showToast(state.editingExpenseId ? "ההוצאה עודכנה" : "ההוצאה נוספה");
+    state.editingExpenseId = null;
+  } catch (error) {
+    console.error(error);
+    showError(els.expenseError, "שגיאה בשמירת ההוצאה");
+  }
+}
+
+async function deleteExpense(expenseId) {
+  const expense = state.expenses.find((e) => e.id === expenseId);
+  if (!expense) return;
+  if (!confirm(`למחוק את ההוצאה "${expense.description || getExpenseCategoryLabel(expense.category)}" על סך ${formatCurrency(expense.amount)}?`)) return;
+  const transaction = state.db.transaction("expenses", "readwrite");
+  transaction.objectStore("expenses").delete(expenseId);
+  await transactionDone(transaction);
+  await refreshData();
+  renderAll();
+  showToast("ההוצאה נמחקה");
 }
 
 function renderAnalytics() {
@@ -3201,11 +3487,12 @@ function exportJson() {
   const payload = {
     app: "TopGear",
     exportedAt: new Date().toISOString(),
-    version: 4,
+    version: 5,
     jobs: state.jobs,
     inventory: state.inventory,
     customCategories: state.customCategories,
     appointments: state.appointments,
+    expenses: state.expenses,
     business: state.business
   };
   downloadFile(`topgear-backup-${toIsoDate(new Date())}.json`, JSON.stringify(payload, null, 2), "application/json");
@@ -3287,6 +3574,16 @@ function exportInventoryCsv() {
   showToast("קובץ מלאי CSV נשמר");
 }
 
+function exportExpensesCsv() {
+  const headers = ["תאריך", "יום", "קטגוריה", "תיאור", "סכום"];
+  // Oldest first for a readable ledger.
+  const rows = [...state.expenses]
+    .sort((a, b) => `${a.date}${a.id}`.localeCompare(`${b.date}${b.id}`))
+    .map((e) => [e.date, getHebrewDay(e.date), getExpenseCategoryLabel(e.category), e.description || "", e.amount]);
+  downloadFile(`topgear-expenses-${toIsoDate(new Date())}.csv`, toCsv(headers, rows), "text/csv;charset=utf-8");
+  showToast("קובץ הוצאות CSV נשמר");
+}
+
 async function importJson(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -3309,7 +3606,8 @@ async function importJson(event) {
       payload.inventory,
       Array.isArray(payload.customCategories) ? payload.customCategories : [],
       Array.isArray(payload.appointments) ? payload.appointments : [],
-      payload.business || null
+      payload.business || null,
+      Array.isArray(payload.expenses) ? payload.expenses : []
     );
     await refreshData();
     renderAll();
@@ -3322,20 +3620,36 @@ async function importJson(event) {
   }
 }
 
-async function replaceAllData(jobs, inventory, customCategories = [], appointments = [], business = null) {
-  const transaction = state.db.transaction(["jobs", "inventory", "categories", "appointments", "settings"], "readwrite");
+async function replaceAllData(jobs, inventory, customCategories = [], appointments = [], business = null, expenses = []) {
+  const transaction = state.db.transaction(["jobs", "inventory", "categories", "appointments", "settings", "expenses"], "readwrite");
   const jobsStore = transaction.objectStore("jobs");
   const inventoryStore = transaction.objectStore("inventory");
   const categoriesStore = transaction.objectStore("categories");
   const appointmentsStore = transaction.objectStore("appointments");
   const settingsStore = transaction.objectStore("settings");
+  const expensesStore = transaction.objectStore("expenses");
 
   jobsStore.clear();
   inventoryStore.clear();
   categoriesStore.clear();
   appointmentsStore.clear();
+  expensesStore.clear();
   if (business && typeof business === "object") {
     settingsStore.put({ ...DEFAULT_BUSINESS, ...business, id: "business" });
+  }
+
+  for (const expense of expenses) {
+    if (!expense || !(Number(expense.amount) > 0)) continue;
+    const record = {
+      date: String(expense.date || toIsoDate(new Date())),
+      category: String(expense.category || "other"),
+      description: String(expense.description || ""),
+      amount: toMoney(expense.amount),
+      createdAt: expense.createdAt || new Date().toISOString(),
+      updatedAt: expense.updatedAt || new Date().toISOString()
+    };
+    if (expense.id !== undefined && expense.id !== null) record.id = expense.id;
+    expensesStore.put(record);
   }
 
   for (const category of customCategories) {

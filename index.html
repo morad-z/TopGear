@@ -53,6 +53,13 @@
             </span>
             <span class="nav-label">תורים</span>
           </button>
+          <button class="nav-button" type="button" data-view="expenses" title="הוצאות">
+            <span class="nav-icon" aria-hidden="true">
+              <!-- wallet -->
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><path d="M16 12h.01"/><path d="M3 9h13a2 2 0 0 1 2 2v2a2 2 0 0 1-2 2H3"/></svg>
+            </span>
+            <span class="nav-label">הוצאות</span>
+          </button>
           <button class="nav-button" type="button" data-view="whatsapp" title="שליחה ללקוח">
             <span class="nav-icon" aria-hidden="true">
               <!-- send -->
@@ -328,6 +335,64 @@
           </div>
         </section>
 
+        <section class="view" id="expensesView" aria-labelledby="expensesHeading">
+          <div class="analytics-band expenses-band">
+            <div class="range-switch" role="group" aria-label="בחירת טווח תאריכים">
+              <button class="range-button" type="button" data-expense-range="today">היום</button>
+              <button class="range-button" type="button" data-expense-range="week">השבוע</button>
+              <button class="range-button active" type="button" data-expense-range="month">החודש</button>
+              <button class="range-button" type="button" data-expense-range="all">הכל</button>
+            </div>
+            <div class="metric" title="הרווח מעבודות שנמסרו בטווח הנבחר (ללא מע&quot;מ, אחרי עלות חלקים)">
+              <span>רווח בטווח</span>
+              <strong id="expenseProfitMetric">₪0</strong>
+              <small class="metric-hint">ללא מע"מ · עבודות שנמסרו</small>
+            </div>
+            <div class="metric" title="סך כל ההוצאות שרשמת בטווח הנבחר">
+              <span>סה"כ הוצאות</span>
+              <strong id="expenseTotalMetric">₪0</strong>
+              <small class="metric-hint">בטווח הנבחר</small>
+            </div>
+            <div class="metric profit" title="רווח פחות הוצאות = מה שנשאר בפועל">
+              <span>רווח נקי</span>
+              <strong id="expenseNetMetric">₪0</strong>
+              <small class="metric-hint">רווח − הוצאות</small>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <label class="search-box">
+              <span>חיפוש</span>
+              <input id="expenseSearch" type="search" placeholder="תיאור הוצאה או קטגוריה" />
+            </label>
+            <button class="primary-button" type="button" id="addExpenseButton">+ הוצאה חדשה</button>
+          </div>
+
+          <div class="expenses-layout">
+            <div class="table-wrap expenses-table-wrap">
+              <table class="data-table data-table-compact" id="expensesTable">
+                <thead>
+                  <tr>
+                    <th>תאריך</th>
+                    <th>קטגוריה</th>
+                    <th>תיאור</th>
+                    <th class="numeric">סכום</th>
+                    <th class="col-actions">פעולות</th>
+                  </tr>
+                </thead>
+                <tbody id="expensesBody"></tbody>
+              </table>
+              <div class="empty-state hidden" id="expensesEmpty">
+                <div class="empty-state-icon" aria-hidden="true">▭</div>
+                <div class="empty-state-title">אין הוצאות בטווח הנבחר</div>
+                <div class="empty-state-text">רשום הוצאות שוטפות — שכירות, כלי עבודה, חשמל, אוכל ועוד — כדי לראות כמה באמת נשאר לך אחרי ההכנסות.</div>
+                <button class="primary-button empty-state-cta" type="button" data-empty-add="expense">+ הוצאה חדשה</button>
+              </div>
+            </div>
+            <aside class="expense-breakdown" id="expenseBreakdown" aria-label="פירוט לפי קטגוריה"></aside>
+          </div>
+        </section>
+
         <section class="view" id="whatsappView" aria-labelledby="whatsappHeading">
           <div class="whatsapp-grid">
             <div class="whatsapp-side">
@@ -417,6 +482,7 @@
                 <button class="secondary-button" type="button" id="exportJsonButton">ייצוא JSON מלא</button>
                 <button class="secondary-button" type="button" id="exportJobsCsvButton">ייצוא יומן CSV</button>
                 <button class="secondary-button" type="button" id="exportInventoryCsvButton">ייצוא מלאי CSV</button>
+                <button class="secondary-button" type="button" id="exportExpensesCsvButton">ייצוא הוצאות CSV</button>
               </div>
             </section>
 
@@ -778,6 +844,41 @@
 
         <div class="modal-actions">
           <button class="secondary-button" type="button" data-close-modal="appointmentModal">ביטול</button>
+          <button class="primary-button" type="submit">שמירה</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="modal-backdrop hidden" id="expenseModal" role="dialog" aria-modal="true" aria-labelledby="expenseModalTitle">
+      <form class="modal compact-modal" id="expenseForm">
+        <div class="modal-header">
+          <h2 id="expenseModalTitle">הוספת הוצאה</h2>
+          <button class="icon-button" type="button" data-close-modal="expenseModal" aria-label="סגירה">×</button>
+        </div>
+
+        <div class="form-grid single">
+          <label>
+            תאריך
+            <input name="date" type="date" required />
+          </label>
+          <label>
+            קטגוריה
+            <select name="category" id="expenseCategorySelect" required></select>
+          </label>
+          <label>
+            תיאור
+            <input name="description" type="text" autocomplete="off" placeholder="לדוגמה: שכירות חודש מאי, מפתח דינמומטרי" />
+          </label>
+          <label>
+            סכום (₪)
+            <input name="amount" type="number" min="0" step="0.01" required inputmode="decimal" placeholder="0" />
+          </label>
+        </div>
+
+        <p class="form-error hidden" id="expenseError"></p>
+
+        <div class="modal-actions">
+          <button class="secondary-button" type="button" data-close-modal="expenseModal">ביטול</button>
           <button class="primary-button" type="submit">שמירה</button>
         </div>
       </form>

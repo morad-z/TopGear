@@ -138,6 +138,35 @@ approved). To get column sum = banner, filter to anything except
 | מע"מ | `taxAmount` |
 | סה"כ לתשלום | `total` |
 
+### Expenses page (`renderExpenses`)
+
+Business expenses (rent, tools, food, salary, …) are deducted from
+**PROFIT, not revenue.** Revenue is just money flowing in and carries
+VAT the garage merely collects for the state — it is not the garage's
+own money. The garage's real earnings on a job are its `profit`
+(`subtotal − partsCost`, pre-VAT). Running costs come out of that.
+
+| Metric | Basis | Range filter |
+|---|---|---|
+| רווח בטווח | `profit` (pre-VAT, after parts cost) | Eligible jobs whose `jobDate` is in the active range |
+| סה"כ הוצאות | Σ `expense.amount` | Expenses whose `date` is in the active range |
+| רווח נקי | `profit − totalExpenses` | (the true bottom line; red when negative) |
+
+Eligibility for the profit figure is identical to the banner:
+`!isQuote && deliveredAt`. The range buttons (היום / השבוע / החודש /
+הכל) filter the profit jobs and the expense rows together so the two
+sides always cover the same window.
+
+```
+רווח בטווח (profit)  =  Σ profit  over delivered non-quote jobs in range
+סה"כ הוצאות          =  Σ expense.amount in range
+רווח נקי (net)       =  profit − totalExpenses
+```
+
+Note: do NOT subtract expenses from Revenue anywhere. Revenue minus
+expenses is meaningless because Revenue still contains VAT owed to the
+state and the suppliers' parts cost.
+
 ### CSV export (`exportJobsCsv`)
 
 All quantities exposed: `partsCost`, `partsPrice`, `laborPrice`,

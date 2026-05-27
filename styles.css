@@ -3822,3 +3822,112 @@ td .plate-link {
 .empty-state-cta {
   margin-top: var(--space-2);
 }
+
+/* ======================================================================
+   v0.1.18 — Expenses page (הוצאות)
+   ====================================================================== */
+
+/* The summary band reuses .analytics-band (range switch + 3 metrics). */
+.metric .metric-negative,
+.metric strong.metric-negative {
+  color: var(--danger);
+}
+
+/* Layout: ledger table on the right, category breakdown on the left. */
+.expenses-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (max-width: 1000px) {
+  .expenses-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* The expenses ledger has only 5 narrow columns, so it must not inherit the
+   wide jobs-table min-width (1280px) which forces an unnecessary scrollbar. */
+.expenses-table-wrap .data-table {
+  min-width: 620px;
+}
+
+.expense-cat-pill {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-micro);
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border: 1px solid var(--accent);
+  white-space: nowrap;
+}
+
+/* Category breakdown side panel */
+.expense-breakdown {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-5);
+  position: sticky;
+  top: var(--space-4);
+}
+
+.expense-breakdown-title {
+  font-size: var(--text-lg);
+  font-weight: 800;
+  color: var(--ink);
+  margin: 0 0 var(--space-3) 0;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.expense-breakdown-empty {
+  color: var(--muted);
+  font-size: var(--text-small);
+  padding: var(--space-3) 0;
+  text-align: center;
+}
+
+.expense-breakdown-row {
+  margin-bottom: var(--space-3);
+}
+
+.expense-breakdown-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: 4px;
+}
+
+.expense-breakdown-cat {
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.expense-breakdown-amount {
+  font-size: var(--text-micro);
+  font-weight: 700;
+  color: var(--muted);
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  white-space: nowrap;
+}
+
+.expense-breakdown-track {
+  height: 8px;
+  background: var(--panel-soft);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.expense-breakdown-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  border-radius: var(--radius-pill);
+  min-width: 3px;
+  transition: width var(--duration) var(--ease-out);
+}
