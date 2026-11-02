@@ -1831,12 +1831,16 @@ tr.job-rejected .plate-link {
 
 /* Print: when user clicks 🖨 הדפס / שמור PDF */
 @media print {
+  body > .app-shell,
+  body > .modal-backdrop:not(#invoiceModal),
+  body > .toast { display: none !important; }
   body * { visibility: hidden; }
   #invoiceModal,
   #invoiceModal * { visibility: visible; }
   #invoiceModal {
-    position: absolute;
-    inset: 0;
+    display: block !important;
+    position: static;
+    padding: 0;
     background: #fff;
   }
   #invoiceModal .no-print { display: none !important; }
@@ -1847,10 +1851,65 @@ tr.job-rejected .plate-link {
     max-height: none;
     overflow: visible;
     width: 100%;
+    margin: 0;
+    display: block;
   }
-  .inv-page { padding: 18mm 14mm; }
-  @page { size: A4; margin: 0; }
+  .inv-page { padding: 0; min-height: 0; }
+  .inv-items { table-layout: fixed; }
+  .inv-items thead { display: table-header-group; }
+  .inv-items tr,
+  .inv-top,
+  .inv-customer-section,
+  .inv-summary,
+  .inv-totals-section,
+  .inv-footer { break-inside: avoid; }
+  .inv-footer { margin-top: 28px; }
+  .inv-signatures { margin-bottom: 16px; }
+  .inv-items th,
+  .inv-items td { padding: 8px; }
+  .inv-items .col-desc,
+  .inv-business,
+  .inv-customer-line { overflow-wrap: anywhere; }
+  .inv-job-meta-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .inv-totals-row.grand { background: #fff; color: #111827; border-top: 2px solid #111827; }
+  .inv-totals-row.grand strong { color: #111827; }
+  @page { size: A4; margin: 12mm 14mm; }
 }
+
+.table-pagination,
+.stock-summary,
+.app-version-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-block: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 0.9rem;
+}
+
+.stock-summary p { margin: 0; }
+.stock-summary strong { color: var(--accent-strong); }
+.stock-summary button[aria-pressed="true"] { border-color: var(--accent-strong); background: var(--accent-soft); }
+.table-pagination .button-row { align-items: center; margin: 0; }
+.app-version-panel strong { unicode-bidi: isolate; }
+
+.field-error { display: block; color: #b42318; font-size: 0.85rem; font-weight: 500; margin-top: 4px; }
+[aria-invalid="true"] { border-color: #b42318 !important; outline-color: #b42318; }
+button:disabled { cursor: default; opacity: 0.65; }
+[aria-busy="true"] button:disabled { cursor: wait; }
+.backup-check-result { margin-top: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; }
+.backup-check-result.is-valid { border-color: #15803d; }
+.backup-check-result.is-invalid { border-color: #b42318; }
+.backup-check-result h3 { margin: 0 0 8px; font-size: 1rem; }
+.backup-check-result ul { padding-inline-start: 20px; overflow-wrap: anywhere; }
+.backup-counts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin: 12px 0; }
+.backup-counts div { display: flex; justify-content: space-between; gap: 8px; }
+.backup-counts dd { margin: 0; font-weight: 700; }
 
 /* Clickable plate styled as a small Israeli license plate */
 .plate-link {

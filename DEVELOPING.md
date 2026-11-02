@@ -118,6 +118,38 @@ To verify a release didn't break persistence, install the previous version, add 
 - The source logo must be square. CI pads it to 1024×1024 via ImageMagick before running `tauri icon`.
 - `withGlobalTauri: true` is required for the static-HTML frontend to access `window.__TAURI__.core.invoke`.
 
+## Frontend checks and recovery
+
+Run `node --test tests/vehicle-lookup.test.js tests/backup-check.test.js` for lookup
+and read-only backup inspection regression tests.
+For the isolated browser, invoice PDF and v0.1.18 upgrade/rollback checks:
+
+```powershell
+python -m pip install -r tests/requirements.txt
+python -m playwright install chromium
+python tests/ui-improvements.py
+python tests/qa-edge-cases.py
+```
+
+The browser check creates a fresh profile with synthetic records, verifies all six
+stores and compares financial totals. It never uses a customer profile. Review
+images and PDFs are written to the ignored `tmp/ui-qa/` directory. Both suites run
+before the release build; the browser test requires the local `v0.1.18` tag.
+
+It also tests repeated submits while real saves are held pending, retry after
+failure, disabled-control value preservation, field-error focus, and current/old/
+malformed backup files. Backup inspection is checked for zero database writes.
+The backup checker is separate from Import and reports structural issues only.
+
+The independent QA checks include failures after the primary write commits:
+retrying must reuse the saved record and must not deduct inventory twice. They
+also cover pending settings navigation and preservation of historical price/VAT
+snapshots, deleted-inventory references and legacy records.
+
+See [the recovery procedure](docs/ROLLBACK.md) before rolling back a release.
+An automatic recovery uses known-good code with a higher app version; it does
+not lower the database version or restore old data over current records.
+
 ## File map
 
 ```

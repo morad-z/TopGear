@@ -40,14 +40,20 @@ TopGear/
 
 **No bundler, no Node modules, no TypeScript.** The frontend is plain JS loaded directly by the HTML. This is intentional — keep it simple. Do NOT add Webpack, Vite, or any build step for the frontend.
 
-**No tests yet.** The codebase has no test suite. If adding one, prefer Vitest + Playwright. Don't break this when adding features — verification is done by reading code + the preview server (see below).
+**Lookup regression tests:** run `node --test tests/vehicle-lookup.test.js` (Node 20+, no dependencies). They exercise the actual frontend functions with controlled API responses, including progressive autofill, caching, timeouts, retries, stale responses, and manual edits. Storage access is forbidden in this test harness. Use the preview server for other UI verification (see below).
+
+**Browser and rollback checks:** `python tests/ui-improvements.py` (dependencies in `tests/requirements.txt`). Uses an isolated Chromium context with synthetic records to verify all six stores survive v0.1.18 → current → v0.1.18, plus paging, totals, unsaved forms, version display and invoice PDFs. See `docs/ROLLBACK.md`. UI paging, modal snapshots and the low-stock filter are in-memory only; keep them out of customer records/backups. The installed version comes from `window.__TAURI__.app.getVersion()`. The native close guard uses `onCloseRequested`, which needs `core:window:allow-destroy` to finish closing after confirmation.
+
+**Save and validation feedback:** normal save events run through `runFormSave`, which checks the existing HTML constraints and guards the containing modal/form against repeated saves. Handlers must snapshot all field values synchronously before their first `await`: the guard disables controls afterward so they remain present in `FormData`. Keep this ordering when editing save handlers. Locks, field errors and backup inspection summaries are memory-only; stored record shapes, database schema, export/import format and financial calculations stay unchanged. `inspectBackup` is a pure read-only structural check, exercised by `node --test tests/backup-check.test.js`; the separate file chooser never imports records. The browser suite tests all five save forms, inline parts, field errors, failure recovery and zero-write backup checks.
+
+**Retries after commit:** retain the primary saved ID in the editing state immediately after its transaction commits, before any follow-up or refresh awaits. `saveAppointment` returns the committed ID for this purpose, matching the existing job/part helpers. Inline creation retains a separate in-memory pending ID until its panel resets. Never add a second record or deduct parts again just because post-save UI refresh failed. `switchView` must not reset business settings while its save is pending. Independent regressions and historical record/snapshot compatibility are covered by `python tests/qa-edge-cases.py`.
 
 ---
 
 ## Data model (IndexedDB)
 
 **Database name**: `topgear_offline_garage`
-**Current version**: `4` (defined in `app.js:DB_VERSION`)
+**Current version**: `5` (defined in `app.js:DB_VERSION`; unchanged by v0.1.19)
 
 | Store | Key | Indexes | Fields |
 |---|---|---|---|
@@ -56,6 +62,7 @@ TopGear/
 | `categories` | string id | — | id (`custom_<rand>`), label, custom: true, createdAt |
 | `appointments` | auto-id | `appointmentDate`, `phoneNumber` | appointmentDate, appointmentTime, customerName, phoneNumber, vehiclePlate, vehicleModel, reason, notes, **arrivedAt** (ISO string or absent) |
 | `settings` | string id | — | Single record with `id: "business"`: name, taxId, address, phone, defaultTaxRate |
+| `expenses` | auto-id | `date`, `category` | date, category, description, amount, createdAt, updatedAt |
 
 **Each `parts[]` entry in a job is a snapshot** — it copies `garageCostSnapshot` and `customerPriceSnapshot` at the time the job was saved, so changing inventory prices later doesn't retroactively change historical jobs. **Never change this** — it's an accounting requirement.
 
@@ -120,10 +127,12 @@ The file is monolithic and roughly grouped:
 
 ## External API: data.gov.il vehicle lookup
 
-The plate autofill (v0.1.3) does a two-step CKAN query:
+The plate autofill uses CKAN queries (introduced in v0.1.3; optimized in v0.1.19):
 
 1. `053cea08-09bc-40ec-8f7a-156f0677aff3` (vehicles) — `{ mispar_rechev: <digits> }` → returns `tozeret_cd`, `degem_cd`, `shnat_yitzur`, `kinuy_mishari`, color, fuel
 2. `142afde2-6228-49f9-8a29-9b6c3a0cbe40` (models) — `{ tozeret_cd, degem_cd, shnat_yitzur }` → returns `nefah_manoa` (cc), `tozar` (clean brand without country)
+
+Jobs fill model/year after the first response, then enrich engine capacity and brand after the second. Appointments skip the engine query. Both queries request only the fields they need and set `include_total=false`. Requests time out after 8 seconds (vehicles) or 5 seconds (models). Successful records share a bounded, 30-minute in-memory cache; identical pending requests are shared too. Nothing is persisted, and failures remain retryable. Form input/reset/submit and modal close invalidate outdated autofill; manual edits always take precedence. Keep all lookup caching separate from customer storage: no database, schema, backup format, or app identity changes are needed for this feature.
 
 `Access-Control-Allow-Origin: *` is set, so this works in both Tauri webview and `npx serve`. No API key needed. Public, free, rate-limited generously.
 

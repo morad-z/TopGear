@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -29,6 +31,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+
+      - name: Test vehicle lookup and read-only backup checker
+        run: node --test tests/vehicle-lookup.test.js tests/backup-check.test.js
+
+      - name: Setup Python for browser and rollback checks
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install browser test dependencies
+        run: |
+          python -m pip install -r tests/requirements.txt
+          python -m playwright install chromium
+
+      - name: Test UI and database compatibility with v0.1.18
+        run: python tests/ui-improvements.py
+
+      - name: Test independent QA edge cases and historical data compatibility
+        run: python tests/qa-edge-cases.py
 
       - name: Pad logo to a square 1024x1024 PNG
         shell: pwsh

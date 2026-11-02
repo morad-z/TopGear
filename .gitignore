@@ -11,6 +11,9 @@ assets/topgear-square.png
 # Node
 node_modules/
 
+# Synthetic browser/PDF review artifacts and local demo server
+tmp/ui-qa/
+
 # OS / editor
 .DS_Store
 Thumbs.db

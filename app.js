@@ -96,11 +96,27 @@ const state = {
 };
 
 const els = {};
+// Presentation state only; never included in customer records or backups.
+const TABLE_PAGE_SIZE = 50;
+const tablePages = {};
+const modalSnapshots = new Map();
+const pendingSaves = new Map();
+const savingForms = new WeakSet();
+const fieldErrors = new WeakMap();
+let fieldErrorSequence = 0;
+let backupCheckSequence = 0;
+let backupCheckReport = null;
+let pendingInlinePartId = null;
+let businessSettingsSnapshot = null;
+let inventoryLowStockOnly = false;
+let allowWindowClose = false;
 
 document.addEventListener("DOMContentLoaded", async () => {
   cacheElements();
   renderCategorySelects();
   bindEvents();
+  loadAppVersion();
+  registerWindowCloseGuard();
 
   try {
     state.db = await openDatabase();
@@ -117,20 +133,74 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 const VEHICLE_DATASET_ID = "053cea08-09bc-40ec-8f7a-156f0677aff3";
 const MODELS_DATASET_ID = "142afde2-6228-49f9-8a29-9b6c3a0cbe40";
+const VEHICLE_LOOKUP_TIMEOUT_MS = 8000;
+const MODEL_LOOKUP_TIMEOUT_MS = 5000;
+const VEHICLE_CACHE_TTL_MS = 30 * 60 * 1000;
+const VEHICLE_CACHE_LIMIT = 200;
+// Session-only public lookup data. Never stored in IndexedDB or backups.
+const vehicleQueryCache = new Map();
+const vehicleQueryRequests = new Map();
+const vehicleFormLookups = new WeakMap();
 
-async function ckanQuery(resourceId, filters) {
-  const url = `https://data.gov.il/api/3/action/datastore_search?resource_id=${resourceId}&filters=${encodeURIComponent(JSON.stringify(filters))}&limit=1`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const data = await response.json();
-  return data?.result?.records?.[0] || null;
+async function ckanQuery(resourceId, filters, fields, timeoutMs = VEHICLE_LOOKUP_TIMEOUT_MS) {
+  const params = new URLSearchParams({
+    resource_id: resourceId,
+    filters: JSON.stringify(filters),
+    fields: fields.join(","),
+    limit: "1",
+    include_total: "false"
+  });
+  const key = params.toString();
+  const cached = vehicleQueryCache.get(key);
+  if (cached && Date.now() - cached.savedAt < VEHICLE_CACHE_TTL_MS) return cached.record;
+  vehicleQueryCache.delete(key);
+  if (vehicleQueryRequests.has(key)) return vehicleQueryRequests.get(key);
+
+  const request = (async () => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(`https://data.gov.il/api/3/action/datastore_search?${params}`, { signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      if (data?.success === false || !Array.isArray(data?.result?.records)) {
+        throw new Error("Invalid vehicle API response");
+      }
+      const record = data.result.records[0] || null;
+      // Failures and missing records remain retryable on the next lookup.
+      if (record) {
+        vehicleQueryCache.set(key, { record, savedAt: Date.now() });
+        if (vehicleQueryCache.size > VEHICLE_CACHE_LIMIT) {
+          vehicleQueryCache.delete(vehicleQueryCache.keys().next().value);
+        }
+      }
+      return record;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        const timeoutError = new Error("Vehicle lookup timed out");
+        timeoutError.name = "TimeoutError";
+        throw timeoutError;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  })();
+  vehicleQueryRequests.set(key, request);
+  try {
+    return await request;
+  } finally {
+    vehicleQueryRequests.delete(key);
+  }
 }
 
-async function lookupVehicleByPlate(plate) {
+async function lookupVehicleByPlate(plate, { includeEngine = true, onBasic = null } = {}) {
   const digits = String(plate || "").replace(/\D/g, "");
   if (digits.length < 5) return null;
 
-  const vehicle = await ckanQuery(VEHICLE_DATASET_ID, { mispar_rechev: digits });
+  const vehicle = await ckanQuery(VEHICLE_DATASET_ID, { mispar_rechev: digits }, [
+    "tozeret_nm", "kinuy_mishari", "shnat_yitzur", "tzeva_rechev", "sug_delek_nm", "tozeret_cd", "degem_cd"
+  ]);
   if (!vehicle) return null;
 
   const manufacturerVerbose = String(vehicle.tozeret_nm || "").trim();
@@ -139,62 +209,106 @@ async function lookupVehicleByPlate(plate) {
   const color = String(vehicle.tzeva_rechev || "").trim();
   const fuelType = String(vehicle.sug_delek_nm || "").trim();
 
-  let cleanBrand = manufacturerVerbose;
-  let engineDisplacement = null;
-  let modelDetails = null;
+  const basic = {
+    model: [manufacturerVerbose, commercial].filter(Boolean).join(" "),
+    year,
+    engineDisplacement: null,
+    color,
+    fuelType
+  };
+  // Fill usable details before waiting for the optional engine query.
+  if (onBasic) onBasic(basic);
+  if (!includeEngine || vehicle.tozeret_cd == null || vehicle.degem_cd == null) return basic;
 
   try {
     const modelFilters = { tozeret_cd: vehicle.tozeret_cd, degem_cd: vehicle.degem_cd };
     if (year) modelFilters.shnat_yitzur = year;
-    modelDetails = await ckanQuery(MODELS_DATASET_ID, modelFilters);
+    const modelDetails = await ckanQuery(MODELS_DATASET_ID, modelFilters, ["tozar", "nefah_manoa"], MODEL_LOOKUP_TIMEOUT_MS);
+    if (modelDetails) {
+      return {
+        ...basic,
+        model: [String(modelDetails.tozar || manufacturerVerbose).trim(), commercial].filter(Boolean).join(" "),
+        engineDisplacement: Number(modelDetails.nefah_manoa) || null
+      };
+    }
   } catch (error) {
     console.warn("Model dataset query failed:", error);
   }
+  return basic;
+}
 
-  if (modelDetails) {
-    if (modelDetails.tozar) cleanBrand = String(modelDetails.tozar).trim();
-    if (modelDetails.nefah_manoa) engineDisplacement = Number(modelDetails.nefah_manoa) || null;
+function resetVehicleLookup(plateInput, clearAutofilled = false) {
+  const lookup = vehicleFormLookups.get(plateInput);
+  if (clearAutofilled && lookup) {
+    for (const [name, value] of lookup.autofilled) {
+      const field = lookup.form.elements[name];
+      if (field && field.value === value) field.value = "";
+    }
   }
+  vehicleFormLookups.delete(plateInput);
+  plateInput.removeAttribute("aria-busy");
+}
 
-  const model = [cleanBrand, commercial].filter(Boolean).join(" ");
-
-  return {
-    model,
-    year,
-    engineDisplacement,
-    color,
-    fuelType
-  };
+function handleVehicleLookupInput(event) {
+  const form = event.currentTarget;
+  const plateInput = form.elements.vehiclePlate;
+  const lookup = vehicleFormLookups.get(plateInput);
+  if (!lookup) return;
+  if (event.target === plateInput) {
+    if (plateInput.value.replace(/\D/g, "") !== lookup.digits) resetVehicleLookup(plateInput, true);
+  } else {
+    // A manual edit (including clearing a field) takes precedence over late results.
+    lookup.autofilled.delete(event.target.name);
+    lookup.editedFields.add(event.target.name);
+  }
 }
 
 async function autofillVehicleFields(plateInput, form, opts = {}) {
-  const plate = plateInput.value;
-  const digits = plate.replace(/\D/g, "");
-  if (digits.length < 5) return;
-  if (plateInput.dataset.lastLookup === digits) return;
-  plateInput.dataset.lastLookup = digits;
+  if (savingForms.has(form)) return;
+  const digits = plateInput.value.replace(/\D/g, "");
+  const previous = vehicleFormLookups.get(plateInput);
+  if (previous && previous.digits !== digits) resetVehicleLookup(plateInput, true);
+  if (digits.length < 5 || (previous?.digits === digits && previous.pending)) return;
 
+  const lookup = vehicleFormLookups.get(plateInput) || {
+    digits, form, autofilled: new Map(), editedFields: new Set()
+  };
+  lookup.pending = true;
+  vehicleFormLookups.set(plateInput, lookup);
+  const isCurrent = () => vehicleFormLookups.get(plateInput) === lookup && plateInput.value.replace(/\D/g, "") === digits;
+  let filled = false;
+  const applyDetails = (data) => {
+    if (!isCurrent()) return;
+    for (const [enabled, name, value] of [
+      [opts.fillModel, "vehicleModel", data.model],
+      [opts.fillYear, "vehicleYear", data.year],
+      [opts.fillEngine, "engineDisplacement", data.engineDisplacement]
+    ]) {
+      const field = form.elements[name];
+      if (!enabled || !field || !value || lookup.editedFields.has(name)) continue;
+      if (field.value && lookup.autofilled.get(name) !== field.value) continue;
+      const next = String(value);
+      if (field.value !== next) {
+        field.value = next;
+        lookup.autofilled.set(name, next);
+        filled = true;
+      }
+    }
+  };
+
+  plateInput.setAttribute("aria-busy", "true");
   showToast("מחפש פרטי רכב...");
   try {
-    const data = await lookupVehicleByPlate(plate);
+    const data = await lookupVehicleByPlate(digits, {
+      includeEngine: Boolean(opts.fillEngine && form.elements.engineDisplacement),
+      onBasic: applyDetails
+    });
+    if (!isCurrent()) return;
     if (!data) {
       showToast("הרכב לא נמצא במאגר משרד התחבורה");
       return;
     }
-
-    let filled = false;
-    if (opts.fillModel && form.elements.vehicleModel && !form.elements.vehicleModel.value && data.model) {
-      form.elements.vehicleModel.value = data.model;
-      filled = true;
-    }
-    if (opts.fillYear && form.elements.vehicleYear && !form.elements.vehicleYear.value && data.year) {
-      form.elements.vehicleYear.value = String(data.year);
-      filled = true;
-    }
-    if (opts.fillEngine && form.elements.engineDisplacement && !form.elements.engineDisplacement.value && data.engineDisplacement) {
-      form.elements.engineDisplacement.value = String(data.engineDisplacement);
-      filled = true;
-    }
+    applyDetails(data);
 
     const summary = [data.model, data.year, data.engineDisplacement && `${data.engineDisplacement} סמ"ק`].filter(Boolean).join(" · ");
     if (filled) {
@@ -203,8 +317,16 @@ async function autofillVehicleFields(plateInput, form, opts = {}) {
       showToast(`נמצא: ${summary} (שדות כבר מולאו)`);
     }
   } catch (error) {
+    if (!isCurrent()) return;
     console.warn("Vehicle lookup failed:", error);
-    showToast("שגיאה בחיפוש הרכב (בדוק חיבור לאינטרנט)");
+    showToast(error.name === "TimeoutError"
+      ? "החיפוש ארך יותר מדי זמן — אפשר לנסות שוב או למלא ידנית"
+      : "שגיאה בחיפוש הרכב — בדוק חיבור לאינטרנט ונסה שוב, או מלא ידנית");
+  } finally {
+    if (isCurrent()) {
+      lookup.pending = false;
+      plateInput.removeAttribute("aria-busy");
+    }
   }
 }
 
@@ -225,17 +347,31 @@ async function checkForUpdates() {
   const notesBlock = notes ? `\n\nמה חדש בגרסה זו:\n${notes}\n` : "";
   const proceed = confirm(`גרסה חדשה (${update.version}) זמינה.\nהגרסה הנוכחית: ${update.current_version}${notesBlock}\nלהוריד ולהתקין כעת? המערכת תאתחל בסיום.`);
   if (!proceed) return;
+  if (!confirmDiscardChanges()) return;
 
   showToast("מוריד עדכון, אנא המתינו...");
   try {
+    allowWindowClose = true;
     await invoke("install_update");
   } catch (error) {
+    allowWindowClose = false;
     console.error(error);
     showToast(`שגיאה בעדכון: ${error}`);
+  } finally {
+    allowWindowClose = false;
   }
 }
 
 function cacheElements() {
+  els.backupCheckInput = document.querySelector("#backupCheckInput");
+  els.backupCheckResult = document.querySelector("#backupCheckResult");
+  els.businessError = document.querySelector("#businessError");
+  els.appVersion = document.querySelector("#appVersion");
+  els.tablePagers = Object.fromEntries(["jobs", "inventory", "deliveries", "appointments", "expenses"]
+    .map((view) => [view, document.querySelector(`#${view}Pagination`)]));
+  els.lowStockCount = document.querySelector("#lowStockCount");
+  els.outOfStockCount = document.querySelector("#outOfStockCount");
+  els.lowStockOnlyButton = document.querySelector("#lowStockOnlyButton");
   els.screenTitle = document.querySelector("#screenTitle");
   els.screenSubtitle = document.querySelector("#screenSubtitle");
   els.navButtons = Array.from(document.querySelectorAll(".nav-button"));
@@ -388,6 +524,35 @@ function cacheElements() {
 }
 
 function bindEvents() {
+  [els.jobForm, els.partForm, els.appointmentForm, els.expenseForm, els.businessSettingsForm].forEach((form) => {
+    // Use the existing HTML constraints, with Hebrew messages beside each field.
+    form.noValidate = true;
+    form.addEventListener("input", (event) => {
+      const field = event.target;
+      if (field.validity?.valid && (!field.required || field.value.trim())) clearFieldError(field);
+    });
+    form.addEventListener("reset", () => clearFieldErrors(form));
+  });
+  els.backupCheckInput.addEventListener("change", checkBackupFile);
+  const tableRenderers = { jobs: renderJobs, inventory: renderInventory, deliveries: renderDeliveries, appointments: renderAppointments, expenses: renderExpenses };
+  Object.entries(els.tablePagers).forEach(([view, pager]) => {
+    pager.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-page]");
+      if (!button || button.disabled || !tablePages[view]) return;
+      tablePages[view].page = Number(button.dataset.page);
+      tableRenderers[view]();
+    });
+  });
+  els.lowStockOnlyButton.addEventListener("click", () => {
+    inventoryLowStockOnly = !inventoryLowStockOnly;
+    renderInventory();
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (!allowWindowClose && hasUnsavedChanges()) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
   els.navButtons.forEach((button) => {
     button.addEventListener("click", () => {
       switchView(button.dataset.view);
@@ -449,7 +614,7 @@ function bindEvents() {
     renderJobs();
   });
 
-  els.jobSearch.addEventListener("input", renderJobs);
+  els.jobSearch.addEventListener("input", debounce(renderJobs));
   els.jobsFilterButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.activeJobsFilter = button.dataset.jobsFilter;
@@ -457,8 +622,8 @@ function bindEvents() {
       renderJobs();
     });
   });
-  els.inventorySearch.addEventListener("input", renderInventory);
-  els.deliverySearch.addEventListener("input", renderDeliveries);
+  els.inventorySearch.addEventListener("input", debounce(renderInventory));
+  els.deliverySearch.addEventListener("input", debounce(renderDeliveries));
   els.deliveryRangeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.activeDeliveryRange = button.dataset.deliveryRange;
@@ -467,7 +632,7 @@ function bindEvents() {
     });
   });
 
-  els.appointmentSearch.addEventListener("input", renderAppointments);
+  els.appointmentSearch.addEventListener("input", debounce(renderAppointments));
   els.appointmentRangeButtons.forEach((button) => {
     button.addEventListener("click", () => {
       state.activeAppointmentRange = button.dataset.appointmentRange;
@@ -476,11 +641,11 @@ function bindEvents() {
     });
   });
   els.addAppointmentButton.addEventListener("click", () => openAppointmentModal());
-  els.appointmentForm.addEventListener("submit", saveAppointmentFromForm);
+  els.appointmentForm.addEventListener("submit", (event) => runFormSave(event, els.appointmentForm, saveAppointmentFromForm));
 
   // Expenses page wiring
   if (els.expenseSearch) {
-    els.expenseSearch.addEventListener("input", renderExpenses);
+    els.expenseSearch.addEventListener("input", debounce(renderExpenses));
   }
   els.expenseRangeButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -493,16 +658,21 @@ function bindEvents() {
     els.addExpenseButton.addEventListener("click", () => openExpenseModal());
   }
   if (els.expenseForm) {
-    els.expenseForm.addEventListener("submit", saveExpenseFromForm);
+    els.expenseForm.addEventListener("submit", (event) => runFormSave(event, els.expenseForm, saveExpenseFromForm));
   }
 
-  els.jobForm.elements.vehiclePlate.addEventListener("blur", (event) => {
-    autofillVehicleFields(event.target, els.jobForm, { fillModel: true, fillYear: true, fillEngine: true });
+  [
+    [els.jobForm, { fillModel: true, fillYear: true, fillEngine: true }],
+    [els.appointmentForm, { fillModel: true }]
+  ].forEach(([form, options]) => {
+    const plateInput = form.elements.vehiclePlate;
+    plateInput.addEventListener("blur", () => autofillVehicleFields(plateInput, form, options));
+    form.addEventListener("input", handleVehicleLookupInput);
+    form.addEventListener("reset", () => resetVehicleLookup(plateInput));
+    // Invalidate pending autofill before a submit handler reads the form.
+    form.addEventListener("submit", () => resetVehicleLookup(plateInput), true);
   });
-  els.appointmentForm.elements.vehiclePlate.addEventListener("blur", (event) => {
-    autofillVehicleFields(event.target, els.appointmentForm, { fillModel: true });
-  });
-  els.partPickerSearch.addEventListener("input", renderPartPicker);
+  els.partPickerSearch.addEventListener("input", debounce(renderPartPicker));
   els.addJobButton.addEventListener("click", () => openJobModal());
   els.addPartButton.addEventListener("click", () => openPartModal());
   // Dashboard quick-actions: same modals/handlers as the in-view buttons.
@@ -644,9 +814,9 @@ function bindEvents() {
   });
   els.toggleInlinePartButton.addEventListener("click", showInlinePartPanel);
   els.cancelInlinePartButton.addEventListener("click", hideInlinePartPanel);
-  els.saveInlinePartButton.addEventListener("click", saveInlinePart);
+  els.saveInlinePartButton.addEventListener("click", (event) => runFormSave(event, els.inlinePartPanel, saveInlinePart));
   els.inlinePartTemporary.addEventListener("change", updateInlinePartMode);
-  els.jobForm.addEventListener("submit", saveJobFromForm);
+  els.jobForm.addEventListener("submit", (event) => runFormSave(event, els.jobForm, saveJobFromForm));
 
   // Job modal tab navigation. The tabs are pure presentation — clicking
   // one only swaps which form section is visible; no form values change.
@@ -682,7 +852,7 @@ function bindEvents() {
       syncJobModeToggleFromCheckbox();
     });
   });
-  els.partForm.addEventListener("submit", savePartFromForm);
+  els.partForm.addEventListener("submit", (event) => runFormSave(event, els.partForm, savePartFromForm));
   els.inlinePartCategory.addEventListener("change", handleCategorySelectChange);
   els.partCategorySelect.addEventListener("change", handleCategorySelectChange);
 
@@ -697,7 +867,7 @@ function bindEvents() {
     els.exportExpensesCsvButton.addEventListener("click", exportExpensesCsv);
   }
   els.importJsonInput.addEventListener("change", importJson);
-  els.businessSettingsForm.addEventListener("submit", saveBusinessFromForm);
+  els.businessSettingsForm.addEventListener("submit", (event) => runFormSave(event, els.businessSettingsForm, saveBusinessFromForm));
   els.invoicePrintButton.addEventListener("click", printInvoiceWithFilename);
   // Safety net: the iframe-based print flow does not mutate the main window's
   // document.title, but the fallback path (if the iframe is denied for any
@@ -716,7 +886,7 @@ function bindEvents() {
       renderWhatsappSourceList();
     });
   });
-  els.whatsappSourceSearch.addEventListener("input", renderWhatsappSourceList);
+  els.whatsappSourceSearch.addEventListener("input", debounce(renderWhatsappSourceList));
   els.whatsappTemplates.forEach((btn) => {
     btn.addEventListener("click", () => applyWhatsappTemplate(btn.dataset.waTemplate));
   });
@@ -732,7 +902,7 @@ function bindEvents() {
     });
   }
 
-  els.vehicleHistorySearch.addEventListener("input", () => {
+  els.vehicleHistorySearch.addEventListener("input", debounce(() => {
     const q = els.vehicleHistorySearch.value;
     const exactMatch = state.jobs.find((j) => normalizePlate(j.vehiclePlate) === normalizePlate(q));
     if (exactMatch && normalizePlate(q).length >= 3) {
@@ -741,7 +911,7 @@ function bindEvents() {
       state.activeVehiclePlate = "";
     }
     renderVehicleHistory();
-  });
+  }));
   els.vehicleHistoryClearButton.addEventListener("click", () => {
     els.vehicleHistorySearch.value = "";
     state.activeVehiclePlate = "";
@@ -1094,12 +1264,15 @@ function downloadInvoiceForWhatsapp() {
 
 function renderBusinessSettings() {
   if (!els.businessSettingsForm) return;
+  // Background refreshes must not erase an unfinished settings edit.
+  if (businessSettingsSnapshot !== null && snapshotForm(els.businessSettingsForm) !== businessSettingsSnapshot) return;
   els.businessSettingsForm.elements.name.value = state.business.name || "";
   els.businessSettingsForm.elements.taxId.value = state.business.taxId || "";
   els.businessSettingsForm.elements.licenseNumber.value = state.business.licenseNumber || "";
   els.businessSettingsForm.elements.address.value = state.business.address || "";
   els.businessSettingsForm.elements.phone.value = state.business.phone || "";
   els.businessSettingsForm.elements.defaultTaxRate.value = String(state.business.defaultTaxRate ?? 18);
+  businessSettingsSnapshot = snapshotForm(els.businessSettingsForm);
 }
 
 async function saveBusinessFromForm(event) {
@@ -1114,6 +1287,7 @@ async function saveBusinessFromForm(event) {
       phone: f.elements.phone.value.trim(),
       defaultTaxRate: Number(f.elements.defaultTaxRate.value) || 18
     });
+    businessSettingsSnapshot = snapshotForm(f);
     showToast("פרטי העסק נשמרו");
   } catch (error) {
     console.error(error);
@@ -1208,6 +1382,16 @@ async function handleCategorySelectChange(event) {
 }
 
 function switchView(view) {
+  if (view !== state.activeView && pendingSaves.has(els.businessSettingsForm)) {
+    showToast("פרטי העסק עדיין נשמרים — יש להמתין לפני מעבר למסך אחר");
+    return;
+  }
+  if (view !== state.activeView && state.activeView === "backup" && businessSettingsSnapshot !== null
+      && snapshotForm(els.businessSettingsForm) !== businessSettingsSnapshot) {
+    if (!confirm("יש שינויים בפרטי העסק שלא נשמרו. לעבור למסך אחר ללא שמירה?")) return;
+    businessSettingsSnapshot = null;
+    renderBusinessSettings();
+  }
   // Remember the previous primary view (not deep-link sub-views like
   // vehicleHistory) so the back button on sub-views can return correctly.
   if (state.activeView && state.activeView !== view && view === "vehicleHistory") {
@@ -1429,7 +1613,9 @@ function renderJobs() {
   });
 
   els.jobsBody.innerHTML = "";
-  rows.forEach((job, index) => {
+  const pageRows = getTablePage("jobs", rows, [query, filter, state.activeRange, state.specificRangeDate, state.specificRangeMonth]);
+  state.selectedJobRow = clamp(state.selectedJobRow, 0, Math.max(0, pageRows.length - 1));
+  pageRows.forEach((job, index) => {
     const totals = getJobTotals(job);
     const isDelivered = Boolean(job.deliveredAt);
     const isQuote = Boolean(job.isQuote);
@@ -1692,14 +1878,18 @@ function renderInventory() {
   const activeCategory = state.activeInventoryCategory || "all";
   const rows = state.inventory.filter((part) => {
     if (activeCategory !== "all" && getPartCategoryId(part) !== activeCategory) return false;
+    if (inventoryLowStockOnly && Number(part.quantity) > 2) return false;
     const haystack = normalizeSearch(`${part.sku} ${part.name} ${getPartCategoryLabel(part)}`);
     return haystack.includes(query);
   });
 
   renderInventoryTotals(rows);
+  renderLowStockSummary();
 
   els.inventoryBody.innerHTML = "";
-  rows.forEach((part, index) => {
+  const pageRows = getTablePage("inventory", rows, [query, activeCategory, inventoryLowStockOnly]);
+  state.selectedInventoryRow = clamp(state.selectedInventoryRow, 0, Math.max(0, pageRows.length - 1));
+  pageRows.forEach((part, index) => {
     const row = document.createElement("tr");
     row.tabIndex = 0;
     row.dataset.rowIndex = String(index);
@@ -1771,7 +1961,7 @@ function renderDeliveries() {
   filtered.sort((a, b) => a.job.deliveryDate.localeCompare(b.job.deliveryDate));
 
   els.deliveriesBody.innerHTML = "";
-  filtered.forEach(({ job, days }) => {
+  getTablePage("deliveries", filtered, [query, rangeFilter]).forEach(({ job, days }) => {
     const totals = getJobTotals(job);
     const statusClass = getDeliveryStatusClass(days);
     const statusLabel = getDeliveryStatusLabel(days);
@@ -1880,7 +2070,7 @@ function renderAppointments() {
   });
 
   els.appointmentsBody.innerHTML = "";
-  filtered.forEach((appointment) => {
+  getTablePage("appointments", filtered, [query, range]).forEach((appointment) => {
     const arrived = Boolean(appointment.arrivedAt);
     const noShow = Boolean(appointment.noShowAt) && !arrived;
     const isExpanded = state.expandedAppointmentIds.has(appointment.id);
@@ -2088,9 +2278,8 @@ function openAppointmentModal(appointmentId = null) {
     els.appointmentForm.elements.appointmentDate.value = toIsoDate(new Date());
   }
 
-  delete els.appointmentForm.elements.vehiclePlate.dataset.lastLookup;
   openModal("appointmentModal");
-  requestAnimationFrame(() => els.appointmentForm.elements.customerName.focus());
+  focusFormOnOpen(els.appointmentForm, els.appointmentForm.elements.customerName);
 }
 
 async function saveAppointmentFromForm(event) {
@@ -2111,27 +2300,32 @@ async function saveAppointmentFromForm(event) {
   };
 
   if (!appointment.appointmentDate) {
-    showError(els.appointmentError, "תאריך הוא שדה חובה");
+    showError(els.appointmentError, "תאריך הוא שדה חובה", els.appointmentForm.elements.appointmentDate);
     return;
   }
   if (!appointment.customerName) {
-    showError(els.appointmentError, "שם הלקוח הוא שדה חובה");
+    showError(els.appointmentError, "שם הלקוח הוא שדה חובה", els.appointmentForm.elements.customerName);
     return;
   }
   if (!appointment.phoneNumber) {
-    showError(els.appointmentError, "מספר טלפון הוא שדה חובה");
+    showError(els.appointmentError, "מספר טלפון הוא שדה חובה", els.appointmentForm.elements.phoneNumber);
     return;
   }
 
+  const wasEditing = Boolean(state.editingAppointmentId);
+  let committed = false;
   try {
-    await saveAppointment(appointment, state.editingAppointmentId);
+    state.editingAppointmentId = await saveAppointment(appointment, state.editingAppointmentId);
+    committed = true;
     await refreshData();
     renderAppointments();
-    closeModal("appointmentModal");
-    showToast(state.editingAppointmentId ? "התור עודכן" : "תור נוסף ליומן");
+    closeModal("appointmentModal", { saved: true });
+    showToast(wasEditing ? "התור עודכן" : "תור נוסף ליומן");
   } catch (error) {
     console.error(error);
-    showError(els.appointmentError, error.message || "שגיאה בשמירת התור");
+    showError(els.appointmentError, committed
+      ? "התור נשמר, אך רענון המסך נכשל. ניסיון נוסף בטופס זה יעדכן את אותו תור."
+      : error.message || "שגיאה בשמירת התור");
   }
 }
 
@@ -2139,16 +2333,18 @@ async function saveAppointment(appointment, appointmentId = null) {
   const transaction = state.db.transaction("appointments", "readwrite");
   const store = transaction.objectStore("appointments");
   const now = new Date().toISOString();
+  let added = null;
 
   if (appointmentId) {
     const existing = await idbRequest(store.get(appointmentId));
     if (!existing) throw new Error("התור לא נמצא");
     store.put({ ...existing, ...appointment, id: appointmentId, updatedAt: now });
   } else {
-    store.add({ ...appointment, createdAt: now, updatedAt: now });
+    added = store.add({ ...appointment, createdAt: now, updatedAt: now });
   }
 
   await transactionDone(transaction);
+  return appointmentId || added.result;
 }
 
 async function deleteAppointment(appointmentId) {
@@ -2286,7 +2482,7 @@ function renderExpenses() {
 
   // --- Table ---
   els.expensesBody.innerHTML = "";
-  rows.forEach((expense) => {
+  getTablePage("expenses", rows, [query, range]).forEach((expense) => {
     const row = document.createElement("tr");
     row.innerHTML = `
       <td><strong>${formatDate(expense.date)}</strong></td>
@@ -2364,7 +2560,7 @@ function openExpenseModal(expenseId = null) {
   }
 
   openModal("expenseModal");
-  requestAnimationFrame(() => els.expenseForm.elements.description.focus());
+  focusFormOnOpen(els.expenseForm, els.expenseForm.elements.description);
 }
 
 async function saveExpenseFromForm(event) {
@@ -2373,7 +2569,7 @@ async function saveExpenseFromForm(event) {
   const form = new FormData(els.expenseForm);
   const amount = Number(form.get("amount"));
   if (!(amount > 0)) {
-    showError(els.expenseError, "יש להזין סכום גדול מאפס");
+    showError(els.expenseError, "יש להזין סכום גדול מאפס", els.expenseForm.elements.amount);
     return;
   }
   const record = {
@@ -2384,24 +2580,31 @@ async function saveExpenseFromForm(event) {
     updatedAt: new Date().toISOString()
   };
 
+  const wasEditing = Boolean(state.editingExpenseId);
+  let committed = false;
   try {
     const transaction = state.db.transaction("expenses", "readwrite");
     const store = transaction.objectStore("expenses");
+    let added = null;
     if (state.editingExpenseId) {
       const existing = await idbRequest(store.get(state.editingExpenseId));
       store.put({ ...existing, ...record, id: state.editingExpenseId });
     } else {
-      store.add({ ...record, createdAt: new Date().toISOString() });
+      added = store.add({ ...record, createdAt: new Date().toISOString() });
     }
     await transactionDone(transaction);
+    if (added) state.editingExpenseId = added.result;
+    committed = true;
     await refreshData();
     renderAll();
-    closeModal("expenseModal");
-    showToast(state.editingExpenseId ? "ההוצאה עודכנה" : "ההוצאה נוספה");
+    closeModal("expenseModal", { saved: true });
+    showToast(wasEditing ? "ההוצאה עודכנה" : "ההוצאה נוספה");
     state.editingExpenseId = null;
   } catch (error) {
     console.error(error);
-    showError(els.expenseError, "שגיאה בשמירת ההוצאה");
+    showError(els.expenseError, committed
+      ? "ההוצאה נשמרה, אך רענון המסך נכשל. ניסיון נוסף בטופס זה יעדכן את אותה הוצאה."
+      : "שגיאה בשמירת ההוצאה");
   }
 }
 
@@ -2691,7 +2894,6 @@ function openJobModal(jobId = null, prefillAppointment = null) {
 
   renderDraftParts();
   renderPartPicker();
-  delete els.jobForm.elements.vehiclePlate.dataset.lastLookup;
   openModal("jobModal");
   // Always start on tab 1 ("פרטים בסיסיים") and sync the mode toggle to the
   // current isQuote checkbox state (which we may have just restored from the
@@ -2699,7 +2901,7 @@ function openJobModal(jobId = null, prefillAppointment = null) {
   // form values or state.
   switchJobModalTab("info");
   syncJobModeToggleFromCheckbox();
-  requestAnimationFrame(() => els.jobForm.elements.vehiclePlate.focus());
+  focusFormOnOpen(els.jobForm, els.jobForm.elements.vehiclePlate);
 
   if (!jobId && prefillAppointment && prefillAppointment.vehiclePlate) {
     autofillVehicleFields(els.jobForm.elements.vehiclePlate, els.jobForm, { fillModel: true, fillYear: true, fillEngine: true });
@@ -2774,7 +2976,7 @@ function openPartModal(partId = null) {
   els.partCategorySelect.dataset.lastValue = els.partCategorySelect.value;
 
   openModal("partModal");
-  requestAnimationFrame(() => els.partForm.elements.sku.focus());
+  focusFormOnOpen(els.partForm, els.partForm.elements.sku);
 }
 
 function addPartToDraft(explicitPartId, explicitQuantity) {
@@ -2874,7 +3076,9 @@ function updateInlinePartMode() {
 }
 
 function hideInlinePartPanel() {
+  pendingInlinePartId = null;
   clearError(els.inlinePartError);
+  clearFieldErrors(els.inlinePartPanel);
   els.inlinePartPanel.classList.add("hidden");
   els.inlinePartSku.value = "";
   els.inlinePartName.value = "";
@@ -2898,22 +3102,22 @@ async function saveInlinePart() {
   const customerPrice = toMoney(els.inlinePartCustomerPrice.value);
 
   if (!name) {
-    showError(els.inlinePartError, "שם חלק הוא שדה חובה");
+    showError(els.inlinePartError, "שם חלק הוא שדה חובה", els.inlinePartName);
     return;
   }
 
   if (!isTemp && !sku) {
-    showError(els.inlinePartError, "מק\"ט הוא שדה חובה לחלק קבוע");
+    showError(els.inlinePartError, "מק\"ט הוא שדה חובה לחלק קבוע", els.inlinePartSku);
     return;
   }
 
   if (quantity < 1) {
-    showError(els.inlinePartError, isTemp ? "כמות לעבודה חייבת להיות לפחות 1" : "כמות במלאי חייבת להיות לפחות 1");
+    showError(els.inlinePartError, isTemp ? "כמות לעבודה חייבת להיות לפחות 1" : "כמות במלאי חייבת להיות לפחות 1", els.inlinePartQuantity);
     return;
   }
 
   if (customerPrice <= 0) {
-    showError(els.inlinePartError, "מחיר ללקוח חייב להיות גדול מ-0");
+    showError(els.inlinePartError, "מחיר ללקוח חייב להיות גדול מ-0", els.inlinePartCustomerPrice);
     return;
   }
 
@@ -2947,7 +3151,8 @@ async function saveInlinePart() {
   };
 
   try {
-    const newPartId = await savePart(part, null);
+    const newPartId = await savePart(part, pendingInlinePartId);
+    pendingInlinePartId = newPartId;
     await refreshData();
     renderInventory();
     renderAnalytics();
@@ -2956,13 +3161,15 @@ async function saveInlinePart() {
     state.selectedPartId = newPartId;
     els.partQuantity.value = "1";
     renderPartPicker();
-    addPartToDraft();
+    if (!state.draftParts.some((entry) => entry.partId === newPartId)) addPartToDraft();
     hideInlinePartPanel();
     showToast("החלק נוצר ונוסף לעבודה");
   } catch (error) {
     console.error(error);
     if (error.name === "ConstraintError") {
-      showError(els.inlinePartError, "מק\"ט זה כבר קיים במלאי");
+      showError(els.inlinePartError, "מק\"ט זה כבר קיים במלאי", els.inlinePartSku);
+    } else if (pendingInlinePartId) {
+      showError(els.inlinePartError, "החלק נשמר במלאי, אך ההוספה לעבודה לא הושלמה. ניסיון נוסף בטופס זה ימשיך עם אותו חלק.");
     } else {
       showError(els.inlinePartError, error.message || "שגיאה ביצירת החלק");
     }
@@ -3100,7 +3307,7 @@ async function saveJobFromForm(event) {
   };
 
   if (!job.vehiclePlate) {
-    showError(els.jobError, "מספר רכב הוא שדה חובה");
+    showError(els.jobError, "מספר רכב הוא שדה חובה", els.jobForm.elements.vehiclePlate);
     return;
   }
 
@@ -3110,8 +3317,13 @@ async function saveJobFromForm(event) {
     return;
   }
 
+  let committed = false;
   try {
     const savedJobId = await saveJobWithInventoryTransaction(job, state.editingJobId);
+    // A later follow-up/refresh failure must retry this job, not add another
+    // job and deduct its parts from inventory a second time.
+    state.editingJobId = savedJobId;
+    committed = true;
     await syncFollowUpAppointment(savedJobId, job);
     const convertedAppointmentId = state.appointmentBeingConverted;
     if (convertedAppointmentId) {
@@ -3132,11 +3344,13 @@ async function saveJobFromForm(event) {
     }
     await refreshData();
     renderAll();
-    closeModal("jobModal");
+    closeModal("jobModal", { saved: true });
     showToast(convertedAppointmentId ? "העבודה נשמרה והתור סומן כהגיע" : "העבודה נשמרה והמלאי עודכן");
   } catch (error) {
     console.error(error);
-    showError(els.jobError, error.message || "שגיאה בשמירת העבודה");
+    showError(els.jobError, committed
+      ? "העבודה נשמרה, אך השלמת התהליך נכשלה. ניסיון נוסף בטופס זה יעדכן את אותה עבודה."
+      : error.message || "שגיאה בשמירת העבודה");
   }
 }
 
@@ -3253,25 +3467,29 @@ async function savePartFromForm(event) {
   };
 
   if (!part.sku || !part.name) {
-    showError(els.partError, "מק\"ט ושם חלק הם שדות חובה");
+    showError(els.partError, "מק\"ט ושם חלק הם שדות חובה", !part.sku ? els.partForm.elements.sku : els.partForm.elements.name);
     return;
   }
 
   if (part.quantity < 0) {
-    showError(els.partError, "כמות לא יכולה להיות שלילית");
+    showError(els.partError, "כמות לא יכולה להיות שלילית", els.partForm.elements.quantity);
     return;
   }
 
+  let committed = false;
   try {
-    await savePart(part);
+    state.editingPartId = await savePart(part);
+    committed = true;
     await refreshData();
     renderAll();
-    closeModal("partModal");
+    closeModal("partModal", { saved: true });
     showToast("החלק נשמר בהצלחה");
   } catch (error) {
     console.error(error);
-    if (error.name === "ConstraintError") {
-      showError(els.partError, "מק\"ט זה כבר קיים במלאי");
+    if (committed) {
+      showError(els.partError, "החלק נשמר, אך רענון המסך נכשל. ניסיון נוסף בטופס זה יעדכן את אותו חלק.");
+    } else if (error.name === "ConstraintError") {
+      showError(els.partError, "מק\"ט זה כבר קיים במלאי", els.partForm.elements.sku);
     } else {
       showError(els.partError, error.message || "שגיאה בשמירת החלק");
     }
@@ -3584,6 +3802,168 @@ function exportExpensesCsv() {
   showToast("קובץ הוצאות CSV נשמר");
 }
 
+function inspectBackup(payload) {
+  const report = { errors: [], warnings: [], counts: {}, exportedAt: "", version: null };
+  let errorCount = 0;
+  const error = (message) => { errorCount++; if (report.errors.length < 20) report.errors.push(message); };
+  const warn = (message) => { if (report.warnings.length < 20 && !report.warnings.includes(message)) report.warnings.push(message); };
+  const isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const isNumber = (value) => (typeof value === "number" || (typeof value === "string" && value.trim() !== "")) && Number.isFinite(Number(value));
+  const isDay = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+  const checkNumber = (record, field, label, min = 0, integer = false, required = false) => {
+    const value = record[field];
+    if (value == null && !required) return;
+    if (!isNumber(value) || Number(value) < min || (integer && !Number.isInteger(Number(value)))) error(`${label}: ערך מספרי לא תקין`);
+  };
+  const checkDay = (record, field, label, required = false) => {
+    if (!record[field] && !required) return;
+    if (!isDay(record[field])) error(`${label}: תאריך לא תקין`);
+  };
+  if (!isRecord(payload)) {
+    report.errors.push("קובץ הגיבוי חייב להכיל מבנה נתונים של TopGear");
+    return { ...report, valid: false };
+  }
+  if (payload.app !== undefined && payload.app !== "TopGear") error("הקובץ אינו מזוהה כגיבוי של TopGear");
+  if (payload.version !== undefined) {
+    report.version = payload.version;
+    if (!Number.isInteger(payload.version) || payload.version < 1 || payload.version > 5) error("גרסת מבנה הגיבוי אינה נתמכת לבדיקה באפליקציה זו");
+  } else warn("לא צוין מספר גרסת מבנה בקובץ; יש לבדוק שזהו גיבוי ישן של TopGear");
+  if (typeof payload.exportedAt === "string" && Number.isFinite(Date.parse(payload.exportedAt))) report.exportedAt = payload.exportedAt;
+  else warn("תאריך יצירת הגיבוי חסר או אינו תקין");
+
+  const labels = { jobs: "עבודות", inventory: "חלקי מלאי", customCategories: "קטגוריות", appointments: "תורים", expenses: "הוצאות" };
+  for (const [name, label] of Object.entries(labels)) {
+    const records = payload[name];
+    report.counts[name] = Array.isArray(records) ? records.length : 0;
+    if (records === undefined && !["jobs", "inventory"].includes(name)) {
+      warn(`הגיבוי אינו כולל ${label}; הדבר אפשרי בגיבויים ישנים`);
+      continue;
+    }
+    if (!Array.isArray(records)) { error(`הרשימה של ${label} חסרה או אינה תקינה`); continue; }
+    const ids = new Set(), skus = new Set();
+    records.forEach((record, index) => {
+      const row = `${label}, רשומה ${index + 1}`;
+      if (!isRecord(record)) { error(`${row}: הרשומה אינה תקינה`); return; }
+      if (name === "customCategories") {
+        if (typeof record.id !== "string" || !record.id.trim() || typeof record.label !== "string" || !record.label.trim()) error(`${row}: חסרים מזהה או שם קטגוריה`);
+      } else if (record.id != null && (!Number.isSafeInteger(record.id) || record.id < 1)) error(`${row}: מזהה הרשומה אינו תקין`);
+      else if (record.id == null) warn("חלק מהרשומות ללא מזהה קבוע; יש לבדוק את הקשרים בין הרשומות לפני ייבוא");
+      if (record.id != null) {
+        if (ids.has(record.id)) error(`${row}: מזהה כפול עלול לגרום לדריסת רשומה בייבוא`);
+        ids.add(record.id);
+      }
+      if (name === "jobs") {
+        if (typeof record.vehiclePlate !== "string" || !record.vehiclePlate.trim()) error(`${row}: חסר מספר רכב`);
+        checkDay(record, "jobDate", row, true);
+        for (const field of ["deliveryDate", "followUpDate"]) checkDay(record, field, row);
+        checkNumber(record, "laborPrice", row);
+        checkNumber(record, "taxRate", row);
+        if (Number(record.taxRate) > 100) error(`${row}: אחוז מע״מ מחוץ לטווח`);
+        for (const field of ["taxEnabled", "isQuote"]) {
+          if (record[field] !== undefined && typeof record[field] !== "boolean") error(`${row}: סימון סוג עבודה או מע״מ אינו תקין`);
+        }
+        if (record.parts !== undefined && !Array.isArray(record.parts)) error(`${row}: רשימת החלקים אינה תקינה`);
+        else (record.parts || []).forEach((part) => {
+          if (!isRecord(part)) { error(`${row}: חלק אינו תקין`); return; }
+          checkNumber(part, "quantityUsed", `${row}, כמות חלקים`, 1, true, true);
+          checkNumber(part, "garageCostSnapshot", `${row}, מחיר עלות היסטורי`, 0, false, true);
+          checkNumber(part, "customerPriceSnapshot", `${row}, מחיר לקוח היסטורי`, 0, false, true);
+        });
+      } else if (name === "inventory") {
+        if (typeof record.sku !== "string" || !record.sku.trim() || typeof record.name !== "string" || !record.name.trim()) error(`${row}: חסרים מק״ט או שם חלק`);
+        if (skus.has(record.sku)) error(`${row}: מק״ט כפול ימנע ייבוא תקין`);
+        skus.add(record.sku);
+        checkNumber(record, "quantity", `${row}, כמות`, 0, true, true);
+        checkNumber(record, "garageCost", `${row}, מחיר עלות`, 0, false, true);
+        checkNumber(record, "customerPrice", `${row}, מחיר לקוח`, 0, false, true);
+      } else if (name === "appointments") {
+        checkDay(record, "appointmentDate", row, true);
+        if (typeof record.customerName !== "string" || !record.customerName.trim()) error(`${row}: חסר שם לקוח והרשומה לא תיקלט בייבוא`);
+      } else if (name === "expenses") {
+        checkDay(record, "date", row, true);
+        if (!isNumber(record.amount) || Number(record.amount) <= 0) error(`${row}: סכום הוצאה חייב להיות גדול מאפס`);
+      }
+    });
+  }
+  report.counts.business = isRecord(payload.business) ? 1 : 0;
+  if (payload.business != null && !isRecord(payload.business)) error("פרטי העסק אינם במבנה תקין");
+  else if (payload.business == null) warn("הגיבוי אינו כולל פרטי עסק");
+  else {
+    checkNumber(payload.business, "defaultTaxRate", "שיעור מע״מ ברירת מחדל");
+    if (Number(payload.business.defaultTaxRate) > 100) error("שיעור מע״מ ברירת מחדל גדול מ-100%");
+  }
+  const supported = new Set(["app", "version", "exportedAt", "business", ...Object.keys(labels)]);
+  if (Object.keys(payload).some((key) => !supported.has(key))) warn("הקובץ כולל מידע נוסף שלא נבדק; ייתכן שלא ייקלט בייבוא בגרסה זו");
+  if (errorCount > report.errors.length) report.errors.push(`נמצאו עוד ${errorCount - report.errors.length} בעיות בקובץ`);
+  return { ...report, valid: errorCount === 0 };
+}
+
+async function checkBackupFile(event) {
+  const sequence = ++backupCheckSequence;
+  const file = event.target.files?.[0];
+  backupCheckReport = null;
+  if (!file) { els.backupCheckResult.classList.add("hidden"); return; }
+  els.backupCheckResult.className = "backup-check-result";
+  els.backupCheckResult.textContent = "בודק את מבנה הקובץ…";
+  try {
+    const payload = JSON.parse(await file.text());
+    if (sequence !== backupCheckSequence) return;
+    backupCheckReport = { ...inspectBackup(payload), filename: file.name };
+  } catch (_) {
+    if (sequence !== backupCheckSequence) return;
+    backupCheckReport = { valid: false, errors: ["לא ניתן לקרוא את הקובץ כגיבוי JSON תקין"], warnings: [], counts: {}, filename: file.name };
+  } finally {
+    if (sequence === backupCheckSequence) {
+      event.target.value = "";
+      renderBackupCheck();
+    }
+  }
+}
+
+function renderBackupCheck() {
+  const report = backupCheckReport;
+  if (!report) return;
+  const result = els.backupCheckResult;
+  result.className = `backup-check-result ${report.valid ? "is-valid" : "is-invalid"}`;
+  result.replaceChildren();
+  const heading = document.createElement("h3");
+  heading.textContent = report.valid ? "בדיקת המבנה הסתיימה בהצלחה" : "נמצאו בעיות בקובץ הגיבוי";
+  const filename = document.createElement("p");
+  filename.textContent = report.filename;
+  result.append(heading, filename);
+  if (report.exportedAt) {
+    const date = document.createElement("p");
+    date.textContent = `תאריך יצירה: ${new Date(report.exportedAt).toLocaleString("he-IL")}`;
+    result.append(date);
+  }
+  const counts = document.createElement("dl");
+  counts.className = "backup-counts";
+  for (const [key, label] of Object.entries({ jobs: "עבודות", inventory: "חלקי מלאי", customCategories: "קטגוריות", appointments: "תורים", expenses: "הוצאות", business: "פרטי עסק" })) {
+    if (report.counts[key] === undefined) continue;
+    const row = document.createElement("div"), term = document.createElement("dt"), count = document.createElement("dd");
+    term.textContent = label;
+    count.textContent = String(report.counts[key]);
+    row.append(term, count);
+    counts.append(row);
+  }
+  result.append(counts);
+  for (const [messages, title] of [[report.errors, "בעיות שיש לבדוק"], [report.warnings, "הערות לבדיקה"]]) {
+    if (!messages.length) continue;
+    const label = document.createElement("strong"), list = document.createElement("ul");
+    label.textContent = title;
+    for (const message of messages) {
+      const item = document.createElement("li");
+      item.textContent = message;
+      list.append(item);
+    }
+    result.append(label, list);
+  }
+  const notice = document.createElement("p");
+  notice.textContent = "זו בדיקת מבנה בלבד. לא יובאו, נמחקו או שונו נתונים. הבדיקה אינה מבטיחה שכל תוכן הקובץ נכון.";
+  result.append(notice);
+}
+
 async function importJson(event) {
   const file = event.target.files?.[0];
   if (!file) return;
@@ -3753,19 +4133,253 @@ function downloadFile(filename, content, type) {
   URL.revokeObjectURL(url);
 }
 
-function openModal(id) {
-  document.querySelector(`#${id}`).classList.remove("hidden");
+function getSaveError(scope) {
+  return new Map([
+    [els.jobForm, els.jobError], [els.partForm, els.partError],
+    [els.appointmentForm, els.appointmentError], [els.expenseForm, els.expenseError],
+    [els.businessSettingsForm, els.businessError], [els.inlinePartPanel, els.inlinePartError]
+  ]).get(scope);
 }
 
-function closeModal(id) {
+function focusFormOnOpen(form, field) {
+  requestAnimationFrame(() => {
+    const invalid = form.querySelector('[aria-invalid="true"]');
+    if (invalid) focusErrorField(invalid);
+    // Do not move focus if the user has already started editing another field.
+    else if (!form.contains(document.activeElement)) field.focus();
+  });
+}
+
+function focusErrorField(field) {
+  const pane = field.closest("[data-modal-pane]");
+  if (pane) switchJobModalTab(pane.dataset.modalPane);
+  field.focus();
+}
+
+function showFieldError(field, message) {
+  let error = fieldErrors.get(field);
+  if (!error) {
+    error = document.createElement("span");
+    error.id = `fieldError-${++fieldErrorSequence}`;
+    error.className = "field-error";
+    field.insertAdjacentElement("afterend", error);
+    fieldErrors.set(field, error);
+  }
+  error.textContent = message;
+  error.classList.remove("hidden");
+  field.setAttribute("aria-invalid", "true");
+  const describedBy = new Set((field.getAttribute("aria-describedby") || "").split(/\s+/).filter(Boolean));
+  describedBy.add(error.id);
+  field.setAttribute("aria-describedby", [...describedBy].join(" "));
+}
+
+function clearFieldError(field) {
+  const error = fieldErrors.get(field);
+  if (!error) return;
+  error.textContent = "";
+  error.classList.add("hidden");
+  field.removeAttribute("aria-invalid");
+  const describedBy = (field.getAttribute("aria-describedby") || "").split(/\s+/).filter((id) => id && id !== error.id);
+  if (describedBy.length) field.setAttribute("aria-describedby", describedBy.join(" "));
+  else field.removeAttribute("aria-describedby");
+}
+
+function clearFieldErrors(scope) {
+  scope.querySelectorAll("input, select, textarea").forEach(clearFieldError);
+}
+
+function getFieldValidationMessage(field) {
+  if (field.required && !field.value.trim()) return "יש למלא שדה זה";
+  const validity = field.validity;
+  if (validity.valueMissing) return "יש למלא שדה זה";
+  if (validity.badInput || validity.typeMismatch) return "יש להזין ערך תקין";
+  if (validity.rangeUnderflow) return `יש להזין ערך של ${field.min} ומעלה`;
+  if (validity.rangeOverflow) return `יש להזין ערך שאינו גדול מ-${field.max}`;
+  if (validity.stepMismatch) return field.step === "0.01" ? "יש להזין סכום עם עד שתי ספרות אחרי הנקודה" : "יש להזין מספר בערך המותר בשדה";
+  if (!validity.valid) return "יש לבדוק את הערך בשדה זה";
+  return "";
+}
+
+function validateFormFields(scope) {
+  let firstInvalid = null;
+  scope.querySelectorAll("input, select, textarea").forEach((field) => {
+    clearFieldError(field);
+    if (!field.willValidate) return;
+    const message = getFieldValidationMessage(field);
+    if (!message) return;
+    showFieldError(field, message);
+    if (!firstInvalid) firstInvalid = field;
+  });
+  if (!firstInvalid) return true;
+  const summary = getSaveError(scope);
+  if (summary) showError(summary, "יש לתקן את השדות המסומנים לפני השמירה");
+  focusErrorField(firstInvalid);
+  return false;
+}
+
+async function runFormSave(event, scope, handler) {
+  event.preventDefault();
+  const root = scope.closest(".modal-backdrop") || scope;
+  if (pendingSaves.has(root)) return;
+  const summary = getSaveError(scope);
+  if (summary) clearError(summary);
+  if (!validateFormFields(scope)) return;
+  const form = scope.closest("form") || scope;
+  pendingSaves.set(root, true);
+  savingForms.add(form);
+  root.setAttribute("aria-busy", "true");
+  let controls = [], button = null, buttonLabel = "";
+  try {
+    // Handlers synchronously snapshot values before their first await. Disable
+    // controls afterward: disabled fields would otherwise vanish from FormData.
+    const operation = handler(event);
+    controls = Array.from(root.querySelectorAll("input, select, textarea, button"))
+      .map((control) => ({ control, disabled: control.disabled }));
+    controls.forEach(({ control }) => { control.disabled = true; });
+    button = scope === els.inlinePartPanel ? els.saveInlinePartButton : scope.querySelector('button[type="submit"]');
+    if (button) {
+      buttonLabel = button.textContent;
+      button.textContent = "שומר…";
+    }
+    await operation;
+  } catch (error) {
+    console.error(error);
+    if (summary) showError(summary, "השמירה לא הושלמה — אפשר לנסות שוב");
+    else showToast("השמירה לא הושלמה — אפשר לנסות שוב");
+  } finally {
+    controls.forEach(({ control, disabled }) => { control.disabled = disabled; });
+    if (button?.textContent === "שומר…") button.textContent = buttonLabel;
+    root.removeAttribute("aria-busy");
+    pendingSaves.delete(root);
+    savingForms.delete(form);
+    const invalid = scope.querySelector('[aria-invalid="true"]');
+    if (invalid && !root.classList.contains("hidden")) focusErrorField(invalid);
+  }
+}
+
+function debounce(callback, delay = 150) {
+  let timer;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => callback(...args), delay);
+  };
+}
+
+function getTablePage(view, rows, filters) {
+  const filterKey = JSON.stringify(filters);
+  const previous = tablePages[view];
+  const totalPages = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+  const page = previous?.filterKey === filterKey ? clamp(previous.page, 1, totalPages) : 1;
+  tablePages[view] = { page, filterKey };
+  const offset = (page - 1) * TABLE_PAGE_SIZE;
+  const pager = els.tablePagers[view];
+  pager.classList.toggle("hidden", rows.length <= TABLE_PAGE_SIZE);
+  pager.innerHTML = `
+    <span role="status">מציג ${offset + 1}–${Math.min(offset + TABLE_PAGE_SIZE, rows.length)} מתוך ${rows.length}</span>
+    <div class="button-row">
+      <button class="secondary-button compact" type="button" data-page="${page - 1}" ${page === 1 ? "disabled" : ""}>הקודם</button>
+      <span>עמוד ${page} מתוך ${totalPages}</span>
+      <button class="secondary-button compact" type="button" data-page="${page + 1}" ${page === totalPages ? "disabled" : ""}>הבא</button>
+    </div>`;
+  return rows.slice(offset, offset + TABLE_PAGE_SIZE);
+}
+
+function renderLowStockSummary() {
+  const low = state.inventory.filter((part) => Number(part.quantity) > 0 && Number(part.quantity) <= 2).length;
+  const empty = state.inventory.filter((part) => Number(part.quantity) <= 0).length;
+  els.lowStockCount.textContent = String(low);
+  els.outOfStockCount.textContent = String(empty);
+  els.lowStockOnlyButton.setAttribute("aria-pressed", String(inventoryLowStockOnly));
+  els.lowStockOnlyButton.textContent = inventoryLowStockOnly ? "הצג את כל רמות המלאי" : "הצג רק מלאי נמוך או חסר";
+}
+
+async function loadAppVersion() {
+  if (!window.__TAURI__) {
+    els.appVersion.textContent = "תצוגה מקדימה בדפדפן";
+    return;
+  }
+  try {
+    els.appVersion.textContent = `v${await window.__TAURI__.app.getVersion()}`;
+  } catch (error) {
+    els.appVersion.textContent = "לא ניתן לקרוא את הגרסה";
+    console.warn("Unable to read installed app version:", error);
+  }
+}
+
+function snapshotForm(form) {
+  return JSON.stringify(Array.from(form.elements)
+    .filter((field) => field.name && !["button", "submit", "reset"].includes(field.type))
+    .map((field) => [field.name, ["checkbox", "radio"].includes(field.type) ? field.checked : field.value]));
+}
+
+function getModalSnapshot(id) {
+  const form = { jobModal: els.jobForm, partModal: els.partForm, appointmentModal: els.appointmentForm, expenseModal: els.expenseForm }[id];
+  if (!form) return null;
+  const snapshot = [snapshotForm(form)];
+  if (id === "jobModal") {
+    snapshot.push(state.draftParts);
+    // An unfinished inline part is also unsaved work, even before "add" is pressed.
+    if (!els.inlinePartPanel.classList.contains("hidden") && (els.inlinePartName.value || els.inlinePartSku.value
+        || Number(els.inlinePartGarageCost.value) || Number(els.inlinePartCustomerPrice.value))) {
+      snapshot.push([els.inlinePartSku.value, els.inlinePartName.value, els.inlinePartCategory.value,
+        els.inlinePartQuantity.value, els.inlinePartGarageCost.value, els.inlinePartCustomerPrice.value, els.inlinePartTemporary.checked]);
+    }
+  }
+  return JSON.stringify(snapshot);
+}
+
+function hasUnsavedChanges() {
+  if (pendingSaves.size) return true;
+  for (const [id, snapshot] of modalSnapshots) {
+    if (getModalSnapshot(id) !== snapshot) return true;
+  }
+  return businessSettingsSnapshot !== null && snapshotForm(els.businessSettingsForm) !== businessSettingsSnapshot;
+}
+
+function confirmDiscardChanges() {
+  if (pendingSaves.size) {
+    showToast("השמירה עדיין בתהליך — יש להמתין לסיומה");
+    return false;
+  }
+  return !hasUnsavedChanges() || confirm("יש שינויים שלא נשמרו. להמשיך ללא שמירה?");
+}
+
+async function registerWindowCloseGuard() {
+  if (!window.__TAURI__?.window?.getCurrentWindow) return;
+  try {
+    await window.__TAURI__.window.getCurrentWindow().onCloseRequested((event) => {
+      if (!confirmDiscardChanges()) event.preventDefault();
+      else allowWindowClose = true;
+    });
+  } catch (error) {
+    console.warn("Unable to register window close protection:", error);
+  }
+}
+
+function openModal(id) {
+  document.querySelector(`#${id}`).classList.remove("hidden");
+  const snapshot = getModalSnapshot(id);
+  if (snapshot !== null) modalSnapshots.set(id, snapshot);
+}
+
+function closeModal(id, { saved = false } = {}) {
+  if (!saved && pendingSaves.has(document.querySelector(`#${id}`))) {
+    showToast("השמירה עדיין בתהליך — יש להמתין לסיומה");
+    return false;
+  }
+  if (!saved && modalSnapshots.has(id) && getModalSnapshot(id) !== modalSnapshots.get(id)
+      && !confirm("יש שינויים בטופס שלא נשמרו. לסגור ללא שמירה?")) return false;
+  if (id === "jobModal") resetVehicleLookup(els.jobForm.elements.vehiclePlate);
+  if (id === "appointmentModal") resetVehicleLookup(els.appointmentForm.elements.vehiclePlate);
   document.querySelector(`#${id}`).classList.add("hidden");
+  modalSnapshots.delete(id);
+  return true;
 }
 
 function closeAllModals() {
-  closeModal("jobModal");
-  closeModal("partModal");
-  closeModal("appointmentModal");
-  closeModal("invoiceModal");
+  for (const id of ["expenseModal", "appointmentModal", "partModal", "jobModal", "invoiceModal"]) {
+    if (!closeModal(id)) break;
+  }
 }
 
 function openVehicleHistory(plate) {
@@ -4049,8 +4663,8 @@ function printInvoiceWithFilename() {
     body * { visibility: visible !important; }
   }
   html, body { margin: 0; padding: 0; background: #fff; }
-  @page { size: A4; margin: 0; }
-  .inv-page { padding: 18mm 14mm; }
+  @page { size: A4; margin: 12mm 14mm; }
+  .inv-page { padding: 0; min-height: 0; }
 </style>
 </head>
 <body>${sheetHtml}</body>
@@ -4207,6 +4821,7 @@ function renderInvoiceHtml(job) {
         </tbody>
       </table>
 
+      <div class="inv-summary">
       <section class="inv-totals-section">
         <div class="inv-notes">
           <div class="inv-section-label">${isQuote ? "תנאים" : "הערות"}</div>
@@ -4238,6 +4853,7 @@ function renderInvoiceHtml(job) {
         </div>
         <div class="inv-footer-fine">המסמך הופק באמצעות TopGear · ${new Date().toLocaleString("he-IL")}</div>
       </footer>
+      </div>
     </div>
   `;
 }
@@ -4248,9 +4864,14 @@ function formatInvoiceCurrency(value) {
   return n.toLocaleString("he-IL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " ₪";
 }
 
-function showError(element, message) {
+function showError(element, message, field = null) {
   element.textContent = message;
+  element.setAttribute("role", "alert");
   element.classList.remove("hidden");
+  if (field) {
+    showFieldError(field, message);
+    focusErrorField(field);
+  }
 }
 
 function clearError(element) {
@@ -4271,7 +4892,7 @@ function handleTableArrowNavigation(event) {
   if (activeModal || ["input", "select", "textarea", "button"].includes(activeTag)) return;
 
   if (state.activeView === "jobs") {
-    const rows = Array.from(els.jobsBody.querySelectorAll("tr"));
+    const rows = Array.from(els.jobsBody.querySelectorAll("tr[data-row-index]"));
     if (rows.length === 0) return;
     event.preventDefault();
     state.selectedJobRow = clamp(state.selectedJobRow + (event.key === "ArrowDown" ? 1 : -1), 0, rows.length - 1);
@@ -4290,7 +4911,7 @@ function handleTableArrowNavigation(event) {
 }
 
 function paintSelectedRows(tbody, selectedIndex) {
-  Array.from(tbody.querySelectorAll("tr")).forEach((row, index) => {
+  Array.from(tbody.querySelectorAll("tr[data-row-index]")).forEach((row, index) => {
     row.classList.toggle("selected", index === selectedIndex);
   });
 }
