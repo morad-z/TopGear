@@ -2858,6 +2858,7 @@ textarea {
 .dash-card:nth-child(2) { animation-delay: 120ms; }
 .dash-card:nth-child(3) { animation-delay: 180ms; }
 .dash-card:nth-child(4) { animation-delay: 240ms; }
+.dash-card:nth-child(5) { animation-delay: 300ms; }
 
 @keyframes dashCardIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -2948,6 +2949,54 @@ textarea {
   text-align: center;
   color: var(--muted);
   font-size: var(--text-small);
+}
+
+/* "הוצאות החודש" card — two mini stats above the latest-expense rows. */
+.dash-expense-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.dash-expense-stat {
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+
+.dash-expense-stat-label {
+  display: block;
+  font-size: var(--text-micro);
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.dash-expense-stat-value {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-xl);
+  font-weight: 900;
+  color: var(--ink);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
+.dash-expense-stat-value.is-negative {
+  color: var(--danger);
+}
+
+.dash-expense-stat-hint {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--text-micro);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dash-quick-actions {

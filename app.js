@@ -387,16 +387,18 @@ function cacheElements() {
     backup: document.querySelector("#backupView")
   };
   // Dashboard ("היום") DOM references — populated by renderTodayView. The
-  // dashboard is a read-only projection over state.jobs and state.appointments
-  // so it can NEVER mutate the business model.
+  // dashboard is a read-only projection over state.jobs, state.appointments
+  // and state.expenses so it can NEVER mutate the business model.
   els.todayKpiStrip = document.querySelector("#todayKpiStrip");
   els.todayAppointmentsBody = document.querySelector("#todayAppointmentsBody");
   els.todayOpenJobsBody = document.querySelector("#todayOpenJobsBody");
   els.todayFollowUpsBody = document.querySelector("#todayFollowUpsBody");
   els.todayQuotesBody = document.querySelector("#todayQuotesBody");
+  els.todayExpensesBody = document.querySelector("#todayExpensesBody");
   els.dashAddJobButton = document.querySelector("#dashAddJobButton");
   els.dashAddAppointmentButton = document.querySelector("#dashAddAppointmentButton");
   els.dashAddPartButton = document.querySelector("#dashAddPartButton");
+  els.dashAddExpenseButton = document.querySelector("#dashAddExpenseButton");
 
   els.rangeButtons = Array.from(document.querySelectorAll("[data-range]"));
   els.specificRangeDate = document.querySelector("#specificRangeDate");
@@ -686,6 +688,9 @@ function bindEvents() {
   if (els.dashAddPartButton) {
     els.dashAddPartButton.addEventListener("click", () => openPartModal());
   }
+  if (els.dashAddExpenseButton) {
+    els.dashAddExpenseButton.addEventListener("click", () => openExpenseModal());
+  }
   // Empty-state CTAs scattered across views — same modal triggers.
   document.querySelectorAll("[data-empty-add]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -797,19 +802,29 @@ function bindEvents() {
   window.addEventListener("resize", repositionOpenKebabs);
   window.addEventListener("scroll", repositionOpenKebabs, { passive: true, capture: true });
   // Dashboard card "→" links navigate to the corresponding view. The
-  // optional data-jobs-filter attribute pre-selects a tab on the jobs view.
+  // optional data-jobs-filter attribute pre-selects a tab on the jobs view;
+  // data-dash-expense-range does the same for the expenses range switch, so
+  // "הוצאות החודש" opens the expenses page on the same month it summarised.
   document.querySelectorAll(".dash-card-link[data-view]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const view = btn.dataset.view;
       const jobsFilter = btn.dataset.jobsFilter;
+      const expenseRange = btn.dataset.dashExpenseRange;
       if (jobsFilter && view === "jobs") {
         state.activeJobsFilter = jobsFilter;
         els.jobsFilterButtons.forEach((b) =>
           b.classList.toggle("active", b.dataset.jobsFilter === jobsFilter)
         );
       }
+      if (expenseRange && view === "expenses") {
+        state.activeExpenseRange = expenseRange;
+        els.expenseRangeButtons.forEach((b) =>
+          b.classList.toggle("active", b.dataset.expenseRange === expenseRange)
+        );
+      }
       switchView(view);
       if (view === "jobs") renderJobs();
+      if (view === "expenses") renderExpenses();
     });
   });
   els.toggleInlinePartButton.addEventListener("click", showInlinePartPanel);
@@ -1423,18 +1438,19 @@ function switchView(view) {
 }
 
 /**
- * Render the "היום" dashboard. PURE READ-ONLY projection over state.jobs
- * and state.appointments — it never mutates either array, never writes
+ * Render the "היום" dashboard. PURE READ-ONLY projection over state.jobs,
+ * state.appointments and state.expenses — it never mutates them, never writes
  * to IndexedDB, and never modifies state shape. Adding new fields to job
  * or appointment objects would not affect this function.
  *
  * The dashboard summarises:
  *   - KPI strip: today's revenue (delivered only, matches analytics filter),
- *     open jobs count, today's appointments count
+ *     today's profit, today's expenses, open jobs count, today's appointments count
  *   - Today's appointments (sorted by time)
  *   - Open jobs (not delivered, not quote, not rejected) sorted oldest-first
  *   - Upcoming follow-up dates within the next 30 days
  *   - Pending quotes (active, not rejected)
+ *   - This month's expenses: total, net (profit − expenses), latest entries
  */
 function renderTodayView() {
   if (!els.todayKpiStrip) return;
@@ -1463,6 +1479,8 @@ function renderTodayView() {
     (a) => !a.arrivedAt && !a.noShowAt && a.appointmentDate === todayIso
   );
   const activeQuotes = state.jobs.filter((j) => j.isQuote && !j.rejectedAt);
+  const expensesToday = state.expenses.filter((e) => e.date === todayIso);
+  const expensesTodayTotal = sumExpenseAmounts(expensesToday);
 
   els.todayKpiStrip.innerHTML = `
     <div class="kpi-tile kpi-tile-revenue">
@@ -1474,6 +1492,11 @@ function renderTodayView() {
       <span class="kpi-label">רווח היום</span>
       <strong class="kpi-value">${formatCurrency(profitToday)}</strong>
       <span class="kpi-sub">${realizedToday.length === 0 ? "טרם נסגרה עבודה" : "לפי עבודות שנמסרו"}</span>
+    </div>
+    <div class="kpi-tile">
+      <span class="kpi-label">הוצאות היום</span>
+      <strong class="kpi-value">${formatCurrency(expensesTodayTotal)}</strong>
+      <span class="kpi-sub">${expensesToday.length === 0 ? "לא נרשמו הוצאות" : expensesToday.length === 1 ? "הוצאה אחת נרשמה" : `${expensesToday.length} הוצאות נרשמו`}</span>
     </div>
     <div class="kpi-tile">
       <span class="kpi-label">עבודות פתוחות</span>
@@ -1574,6 +1597,54 @@ function renderTodayView() {
         })
         .join("")
     : `<div class="dash-empty">אין הצעות מחיר ממתינות</div>`;
+
+  renderTodayExpensesCard();
+}
+
+/**
+ * "הוצאות החודש" dashboard card. Read-only over state.expenses/state.jobs:
+ * same month window and same money rule as the expenses page
+ * (net = delivered profit − expenses), so the two screens always agree.
+ */
+function renderTodayExpensesCard() {
+  if (!els.todayExpensesBody) return;
+  const { start, end } = getExpenseDateRange("month");
+  // state.expenses is already sorted newest-first by refreshData.
+  const monthExpenses = state.expenses.filter((e) => isDateInRange(e.date, start, end));
+  const total = sumExpenseAmounts(monthExpenses);
+  const profit = getDeliveredProfitInRange(start, end);
+  const net = profit - total;
+  const countLabel = monthExpenses.length === 1 ? "הוצאה אחת" : `${monthExpenses.length} הוצאות`;
+
+  const summary = `
+    <div class="dash-expense-summary">
+      <div class="dash-expense-stat">
+        <span class="dash-expense-stat-label">סה"כ הוצאות</span>
+        <strong class="dash-expense-stat-value">${formatCurrency(total)}</strong>
+        <span class="dash-expense-stat-hint">${countLabel}</span>
+      </div>
+      <div class="dash-expense-stat" title="רווח מעבודות שנמסרו החודש (ללא מע&quot;מ, אחרי עלות חלקים) פחות ההוצאות">
+        <span class="dash-expense-stat-label">רווח נקי</span>
+        <strong class="dash-expense-stat-value${net < 0 ? " is-negative" : ""}">${formatCurrency(net)}</strong>
+        <span class="dash-expense-stat-hint">רווח ${formatCurrency(profit)} − הוצאות</span>
+      </div>
+    </div>`;
+
+  const recentRows = monthExpenses.slice(0, 4).map((e) => {
+    const categoryLabel = escapeHtml(getExpenseCategoryLabel(e.category));
+    const title = e.description ? escapeHtml(e.description) : categoryLabel;
+    const sub = e.description ? `${formatCurrency(e.amount)} · ${categoryLabel}` : formatCurrency(e.amount);
+    return `
+        <div class="dash-row">
+          <div class="dash-row-time">${formatDate(e.date)}</div>
+          <div class="dash-row-main">
+            <div class="dash-row-title">${title}</div>
+            <div class="dash-row-sub">${sub}</div>
+          </div>
+        </div>`;
+  }).join("");
+
+  els.todayExpensesBody.innerHTML = summary + (recentRows || `<div class="dash-empty">לא נרשמו הוצאות החודש</div>`);
 }
 
 function renderJobs() {
@@ -2434,6 +2505,24 @@ function getExpenseDateRange(range) {
   return { start, end };
 }
 
+// Business expenses are deducted from PROFIT, not revenue. Revenue is just
+// money coming in (and includes VAT, which the garage only collects on the
+// government's behalf). The money the garage actually keeps from a job is the
+// profit (labor + parts markup, pre-VAT). Summed over delivered, non-quote jobs
+// in the window, mirroring renderAnalytics so every screen agrees.
+// Shared by the expenses page and the dashboard card — read-only over state.
+function getDeliveredProfitInRange(start, end) {
+  return state.jobs.reduce((sum, job) => {
+    if (job.isQuote || !job.deliveredAt) return sum;
+    if (!isDateInRange(job.jobDate, start, end)) return sum;
+    return sum + getJobTotals(job).profit;
+  }, 0);
+}
+
+function sumExpenseAmounts(expenses) {
+  return expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+}
+
 function renderExpenseCategorySelect() {
   if (!els.expenseCategorySelect) return;
   els.expenseCategorySelect.innerHTML = EXPENSE_CATEGORIES
@@ -2458,18 +2547,10 @@ function renderExpenses() {
   });
 
   // --- Summary band ---
-  // Business expenses are deducted from PROFIT, not revenue. Revenue is just
-  // money coming in (and includes VAT, which the garage only collects on the
-  // government's behalf). The money the garage actually keeps from a job is the
-  // profit (labor + parts markup, pre-VAT). So the bottom line shown here is
-  // profit − expenses. Profit is summed over delivered, non-quote jobs in the
-  // SAME window, mirroring renderAnalytics so the two pages agree.
-  const profit = state.jobs.reduce((sum, job) => {
-    if (job.isQuote || !job.deliveredAt) return sum;
-    if (!isDateInRange(job.jobDate, start, end)) return sum;
-    return sum + getJobTotals(job).profit;
-  }, 0);
-  const totalExpenses = rows.reduce((s, e) => s + Number(e.amount || 0), 0);
+  // Business expenses are deducted from PROFIT, not revenue (see
+  // getDeliveredProfitInRange). The bottom line shown here is profit − expenses.
+  const profit = getDeliveredProfitInRange(start, end);
+  const totalExpenses = sumExpenseAmounts(rows);
   const net = profit - totalExpenses;
 
   if (els.expenseProfitMetric) els.expenseProfitMetric.textContent = formatCurrency(profit);
